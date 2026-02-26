@@ -88,10 +88,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import re
+frontend_url = os.getenv('FRONTEND_URL')
 allowed_origins = [
-    "http://localhost:3000",  # Development
-    os.getenv('FRONTEND_URL', '*')  # Production
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
+
+if frontend_url:
+    # Add the provided URL and also a version without trailing slash
+    allowed_origins.append(frontend_url)
+    if frontend_url.endswith('/'):
+        allowed_origins.append(frontend_url[:-1])
+    else:
+        allowed_origins.append(frontend_url + '/')
+else:
+    # Fallback to allow all during setup, but MUST reflect origin for credentials
+    # This is a bit looser but prevents the absolute "CORS error" blockade
+    allowed_origins = [re.compile(r'.*')]
 
 CORS(app, origins=allowed_origins, supports_credentials=True)
 
