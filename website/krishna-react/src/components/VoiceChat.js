@@ -6,7 +6,7 @@ import './VoiceChat.css';
 import axios from 'axios';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import API_BASE_URL, { API_ENDPOINTS } from '../config/api';
+import { API_ENDPOINTS } from '../config/api';
 
 const API_URL = API_ENDPOINTS.ASK;
 
