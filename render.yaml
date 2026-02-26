@@ -1,0 +1,23 @@
+services:
+  # Backend API Service
+  - type: web
+    name: talk-to-krishna-api
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: "pip install -r requirements.txt && python -m src.create_embeddings"
+    startCommand: "gunicorn website.api_server:app --workers 1 --threads 4 --timeout 180 --preload"
+    disk:
+      name: data-disk
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+      - key: GROQ_API_KEY
+        sync: false
+      - key: FRONTEND_URL
+        # Remove trailing slash. Ex. https://example.vercel.app
+        sync: false
+      - key: DB_PATH
+        value: /data/users.db
