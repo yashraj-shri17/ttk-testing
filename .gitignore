@@ -91,6 +91,8 @@ run_quality_test.py
 setup.py
 ask_krishna.py
 *.txt
+!requirements.txt
+!runtime.txt
 !.env.example
 .pytest_cache/
 .coverage
