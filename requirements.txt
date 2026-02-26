@@ -1,5 +1,5 @@
 # Core Dependencies
-numpy>=1.26.0,<2.2.0
+numpy==1.26.4
 scikit-learn>=1.4.2
 fastembed>=0.2.0                # Lightweight, ONNX-based, no PyTorch required
 rank-bm25>=0.2.2

@@ -23,6 +23,7 @@ The API server runs entirely on Python using `Flask`, `Gunicorn`, and `Edge-TTS`
 4. Render will automatically detect the `render.yaml` file located in the root directory.
     - *The `render.yaml` magically configures the entire API Server, sets up Gunicorn, provisions a Persistent Disk for your SQLite `users.db`, and queues up the startup scripts.*
 5. Render will ask you to provide **Environment Variables** securely via its dashboard. Ensure you click **Advanced** under the web service and provide the following strictly:
+    - **CRITICAL:** `PYTHON_VERSION`: Set this to `3.10.12`. (Render may ignore your files and try to use 3.14 which will crash your build).
     - `GROQ_API_KEY`: Enter your Groq API secret (`gsk_...`).
     - `FRONTEND_URL`: Leave it blank for now. We will return to update this *after* the Frontend is deployed! (This restricts cross-origin request abuse).
 6. Click **Apply**.
