@@ -24,7 +24,8 @@ function VoiceChat() {
     const [activeMessageId, setActiveMessageId] = useState(null);
     const mediaRecorderRef = useRef(null);
     const audioChunksRef = useRef([]);
-    const persistentAudioRef = useRef(null);
+    const audioContextRef = useRef(null); // replaces persistentAudioRef
+    const sourceNodeRef = useRef(null);   // tracks current playback
     const isAudioUnlockedRef = useRef(false);
     const isCancelledRef = useRef(false);
 
@@ -34,28 +35,48 @@ function VoiceChat() {
     const stopAudio = useCallback(() => {
         console.log("Stopping audio...");
         isCancelledRef.current = true; // Signal cancellation
-        const audio = persistentAudioRef.current;
-        if (audio) {
-            audio.pause();
-            audio.currentTime = 0;
+
+        if (sourceNodeRef.current) {
+            try {
+                sourceNodeRef.current.stop();
+                sourceNodeRef.current.disconnect();
+            } catch (e) {
+                // Ignore if already stopped
+            }
+            sourceNodeRef.current = null;
         }
+
         setIsSpeaking(false);
         setActiveMessageId(null);
     }, []);
 
-    const unlockAudio = useCallback(() => {
-        if (isAudioUnlockedRef.current) return;
+    const unlockAudio = useCallback(async () => {
+        if (isAudioUnlockedRef.current && audioContextRef.current) return;
 
-        console.log("Unlocking audio for iOS...");
-        const audio = persistentAudioRef.current;
-        // Use a tiny silent base64 wav to unlock the audio context
-        audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-        audio.play().then(() => {
+        console.log("Unlocking audio context for iOS...");
+        try {
+            // Create AudioContext on user gesture
+            if (!audioContextRef.current) {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                audioContextRef.current = new AudioContextClass();
+            }
+
+            if (audioContextRef.current.state === 'suspended') {
+                await audioContextRef.current.resume();
+            }
+
+            // Play a short silent buffer to fully prime the context
+            const buffer = audioContextRef.current.createBuffer(1, 1, 22050);
+            const node = audioContextRef.current.createBufferSource();
+            node.buffer = buffer;
+            node.connect(audioContextRef.current.destination);
+            node.start(0);
+
             isAudioUnlockedRef.current = true;
-            console.log("Audio context successfully unlocked");
-        }).catch(err => {
-            console.warn("Audio unlock failed (expected if no user gesture):", err);
-        });
+            console.log("AudioContext successfully unlocked/resumed");
+        } catch (err) {
+            console.warn("Audio unlock failed:", err);
+        }
     }, []);
 
     const speakText = useCallback(async (text, messageId = null, audioUrl = null) => {
@@ -70,38 +91,45 @@ function VoiceChat() {
         setActiveMessageId(messageId);
 
         try {
-            let src;
-            if (audioUrl) {
-                // Point directly to the served audio file
-                const baseUrl = API_ENDPOINTS.ASK.split('/api/ask')[0];
-                src = `${baseUrl}${audioUrl}`;
-            } else {
-                // Fallback to generating on the fly (for history or if direct URL missing)
-                const response = await axios.post(API_ENDPOINTS.SPEAK, { text }, { responseType: 'blob' });
-                if (isCancelledRef.current) return;
-                src = URL.createObjectURL(response.data);
+            // Ensure AudioContext is ready
+            if (!audioContextRef.current) {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                audioContextRef.current = new AudioContextClass();
+            }
+            if (audioContextRef.current.state === 'suspended') {
+                await audioContextRef.current.resume();
             }
 
-            const audio = persistentAudioRef.current;
-            if (!audio) return;
+            let audioBuffer;
+            if (audioUrl) {
+                const baseUrl = API_ENDPOINTS.ASK.split('/api/ask')[0];
+                const fullUrl = `${baseUrl}${audioUrl}`;
+                const response = await axios.get(fullUrl, { responseType: 'arraybuffer' });
+                if (isCancelledRef.current) return;
+                audioBuffer = await audioContextRef.current.decodeAudioData(response.data);
+            } else {
+                const response = await axios.post(API_ENDPOINTS.SPEAK, { text }, { responseType: 'arraybuffer' });
+                if (isCancelledRef.current) return;
+                audioBuffer = await audioContextRef.current.decodeAudioData(response.data);
+            }
 
-            audio.src = src;
-            audio.load();
+            if (isCancelledRef.current) return;
 
-            audio.onended = () => {
-                setIsSpeaking(false);
-                setActiveMessageId(null);
-                if (!audioUrl) URL.revokeObjectURL(src);
+            const source = audioContextRef.current.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(audioContextRef.current.destination);
+
+            source.onended = () => {
+                if (sourceNodeRef.current === source) {
+                    setIsSpeaking(false);
+                    setActiveMessageId(null);
+                    sourceNodeRef.current = null;
+                }
             };
 
-            audio.onerror = (e) => {
-                console.error('Audio playback failed', e);
-                setIsSpeaking(false);
-                setActiveMessageId(null);
-            };
+            sourceNodeRef.current = source;
+            source.start(0);
 
-            // On modern Safari, this works if prime was successful
-            await audio.play();
         } catch (error) {
             console.error('Speech synthesis error', error);
             setIsSpeaking(false);
@@ -113,10 +141,9 @@ function VoiceChat() {
         setIsLoading(true);
         setTranscript('Transcribing...');
 
-        // Prime audio on gesture (this is the "stop recording" touch)
-        if (persistentAudioRef.current) {
-            persistentAudioRef.current.play().catch(() => { });
-            persistentAudioRef.current.pause();
+        // Resume audio context on gesture
+        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+            audioContextRef.current.resume().catch(() => { });
         }
 
         const formData = new FormData();
@@ -236,8 +263,10 @@ function VoiceChat() {
         return () => {
             console.log("Route changing/unmounting - stopping audio");
             isCancelledRef.current = true;
-            if (persistentAudioRef.current) {
-                persistentAudioRef.current.pause();
+            if (sourceNodeRef.current) {
+                try {
+                    sourceNodeRef.current.stop();
+                } catch (e) { }
             }
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
                 mediaRecorderRef.current.stop();
@@ -432,13 +461,6 @@ function VoiceChat() {
                 onClearHistory={clearHistory}
             />
 
-            {/* Hidden audio element for persistent playback channel */}
-            <audio
-                ref={persistentAudioRef}
-                style={{ display: 'none' }}
-                preload="auto"
-                playsInline
-            />
         </div>
     );
 }
