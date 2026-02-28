@@ -244,6 +244,7 @@ def ask_question():
             if include_audio:
                 audio_id = _generate_audio_async(greeting_text)
                 response['audio_url'] = f'/api/audio/{audio_id}'
+                print(f"Greeting audio generated: {audio_id}")
             
             return jsonify(response)
         # ------------------------------------

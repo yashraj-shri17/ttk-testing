@@ -24,7 +24,7 @@ function VoiceChat() {
     const [activeMessageId, setActiveMessageId] = useState(null);
     const mediaRecorderRef = useRef(null);
     const audioChunksRef = useRef([]);
-    const persistentAudioRef = useRef(new Audio());
+    const persistentAudioRef = useRef(null);
     const isAudioUnlockedRef = useRef(false);
     const isCancelledRef = useRef(false);
 
@@ -58,32 +58,40 @@ function VoiceChat() {
         });
     }, []);
 
-    const speakText = useCallback(async (text, messageId = null) => {
+    const speakText = useCallback(async (text, messageId = null, audioUrl = null) => {
         if ((isSpeaking) && activeMessageId === messageId && messageId !== null) {
             stopAudio();
             return;
         }
 
         stopAudio();
-
-        // Reset cancellation flag
         isCancelledRef.current = false;
         setIsSpeaking(true);
         setActiveMessageId(messageId);
 
         try {
-            const response = await axios.post(API_ENDPOINTS.SPEAK, { text }, { responseType: 'blob' });
-            if (isCancelledRef.current) return;
+            let src;
+            if (audioUrl) {
+                // Point directly to the served audio file
+                const baseUrl = API_ENDPOINTS.ASK.split('/api/ask')[0];
+                src = `${baseUrl}${audioUrl}`;
+            } else {
+                // Fallback to generating on the fly (for history or if direct URL missing)
+                const response = await axios.post(API_ENDPOINTS.SPEAK, { text }, { responseType: 'blob' });
+                if (isCancelledRef.current) return;
+                src = URL.createObjectURL(response.data);
+            }
 
-            const audioBlobUrl = URL.createObjectURL(response.data);
             const audio = persistentAudioRef.current;
+            if (!audio) return;
 
-            audio.src = audioBlobUrl;
+            audio.src = src;
+            audio.load();
 
             audio.onended = () => {
                 setIsSpeaking(false);
                 setActiveMessageId(null);
-                URL.revokeObjectURL(audioBlobUrl);
+                if (!audioUrl) URL.revokeObjectURL(src);
             };
 
             audio.onerror = (e) => {
@@ -92,18 +100,24 @@ function VoiceChat() {
                 setActiveMessageId(null);
             };
 
+            // On modern Safari, this works if prime was successful
             await audio.play();
         } catch (error) {
             console.error('Speech synthesis error', error);
             setIsSpeaking(false);
             setActiveMessageId(null);
         }
-
     }, [stopAudio, isSpeaking, activeMessageId]);
 
     const handleAudioUpload = async (audioBlob) => {
         setIsLoading(true);
         setTranscript('Transcribing...');
+
+        // Prime audio on gesture (this is the "stop recording" touch)
+        if (persistentAudioRef.current) {
+            persistentAudioRef.current.play().catch(() => { });
+            persistentAudioRef.current.pause();
+        }
 
         const formData = new FormData();
         formData.append('audio', audioBlob, 'record.webm');
@@ -147,7 +161,7 @@ function VoiceChat() {
 
             const response = await axios.post(API_URL, {
                 question: text,
-                include_audio: false,
+                include_audio: true, // Request audio URL directly
                 session_id: sessionId,
                 user_id: user?.id
             }, {
@@ -167,8 +181,13 @@ function VoiceChat() {
 
             setMessages(prev => [...prev, krishnaMessage]);
 
-            // Speak the response using browser TTS and mark as active
-            speakText(krishnaMessage.text, krishnaMessageId);
+            // If audio_url is present, use it directly for faster playback
+            if (response.data.audio_url) {
+                const fullAudioUrl = `${window.location.origin.includes('localhost') ? 'http://localhost:5000' : ''}${response.data.audio_url}`;
+                speakText(krishnaMessage.text, krishnaMessageId, response.data.audio_url);
+            } else {
+                speakText(krishnaMessage.text, krishnaMessageId);
+            }
 
         } catch (error) {
             console.error('Error:', error);
@@ -411,6 +430,14 @@ function VoiceChat() {
                     setShowHistory(false);
                 }}
                 onClearHistory={clearHistory}
+            />
+
+            {/* Hidden audio element for persistent playback channel */}
+            <audio
+                ref={persistentAudioRef}
+                style={{ display: 'none' }}
+                preload="auto"
+                playsInline
             />
         </div>
     );
