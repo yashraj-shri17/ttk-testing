@@ -24,7 +24,8 @@ function VoiceChat() {
     const [activeMessageId, setActiveMessageId] = useState(null);
     const mediaRecorderRef = useRef(null);
     const audioChunksRef = useRef([]);
-    const audioRef = useRef(null);
+    const persistentAudioRef = useRef(new Audio());
+    const isAudioUnlockedRef = useRef(false);
     const isCancelledRef = useRef(false);
 
     // Generate Session ID once per mount
@@ -33,13 +34,28 @@ function VoiceChat() {
     const stopAudio = useCallback(() => {
         console.log("Stopping audio...");
         isCancelledRef.current = true; // Signal cancellation
-        if (audioRef.current) {
-            audioRef.current.pause();
-            audioRef.current.currentTime = 0;
-            audioRef.current = null;
+        const audio = persistentAudioRef.current;
+        if (audio) {
+            audio.pause();
+            audio.currentTime = 0;
         }
         setIsSpeaking(false);
         setActiveMessageId(null);
+    }, []);
+
+    const unlockAudio = useCallback(() => {
+        if (isAudioUnlockedRef.current) return;
+
+        console.log("Unlocking audio for iOS...");
+        const audio = persistentAudioRef.current;
+        // Use a tiny silent base64 wav to unlock the audio context
+        audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+        audio.play().then(() => {
+            isAudioUnlockedRef.current = true;
+            console.log("Audio context successfully unlocked");
+        }).catch(err => {
+            console.warn("Audio unlock failed (expected if no user gesture):", err);
+        });
     }, []);
 
     const speakText = useCallback(async (text, messageId = null) => {
@@ -52,39 +68,36 @@ function VoiceChat() {
 
         // Reset cancellation flag
         isCancelledRef.current = false;
+        setIsSpeaking(true);
+        setActiveMessageId(messageId);
 
-        setTimeout(async () => {
+        try {
+            const response = await axios.post(API_ENDPOINTS.SPEAK, { text }, { responseType: 'blob' });
             if (isCancelledRef.current) return;
-            setIsSpeaking(true);
-            setActiveMessageId(messageId);
 
-            try {
-                const response = await axios.post(API_ENDPOINTS.SPEAK, { text }, { responseType: 'blob' });
-                if (isCancelledRef.current) return;
+            const audioBlobUrl = URL.createObjectURL(response.data);
+            const audio = persistentAudioRef.current;
 
-                const audioBlobUrl = URL.createObjectURL(response.data);
-                const audio = new Audio(audioBlobUrl);
-                audioRef.current = audio;
+            audio.src = audioBlobUrl;
 
-                audio.onended = () => {
-                    setIsSpeaking(false);
-                    setActiveMessageId(null);
-                    URL.revokeObjectURL(audioBlobUrl);
-                };
-
-                audio.onerror = () => {
-                    console.error('Audio playback failed');
-                    setIsSpeaking(false);
-                    setActiveMessageId(null);
-                };
-
-                await audio.play();
-            } catch (error) {
-                console.error('Speech synthesis error', error);
+            audio.onended = () => {
                 setIsSpeaking(false);
                 setActiveMessageId(null);
-            }
-        }, 50);
+                URL.revokeObjectURL(audioBlobUrl);
+            };
+
+            audio.onerror = (e) => {
+                console.error('Audio playback failed', e);
+                setIsSpeaking(false);
+                setActiveMessageId(null);
+            };
+
+            await audio.play();
+        } catch (error) {
+            console.error('Speech synthesis error', error);
+            setIsSpeaking(false);
+            setActiveMessageId(null);
+        }
 
     }, [stopAudio, isSpeaking, activeMessageId]);
 
@@ -204,9 +217,8 @@ function VoiceChat() {
         return () => {
             console.log("Route changing/unmounting - stopping audio");
             isCancelledRef.current = true;
-            if (audioRef.current) {
-                audioRef.current.pause();
-                audioRef.current = null;
+            if (persistentAudioRef.current) {
+                persistentAudioRef.current.pause();
             }
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
                 mediaRecorderRef.current.stop();
@@ -215,6 +227,9 @@ function VoiceChat() {
     }, [location]);
 
     const toggleListening = () => {
+        // Unlock audio on first interaction for iOS
+        unlockAudio();
+
         if (isListening) {
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
                 mediaRecorderRef.current.stop();
@@ -330,7 +345,11 @@ function VoiceChat() {
                             <span className="highlight">From The Divine</span>
                         </h1>
                         <div className="quick-actions">
-                            <button className="action-chip active" onClick={() => { handleVoiceInput("Tell me about Karma Yoga"); setHasStarted(true); }}>
+                            <button className="action-chip active" onClick={() => {
+                                unlockAudio();
+                                handleVoiceInput("Tell me about Karma Yoga");
+                                setHasStarted(true);
+                            }}>
                                 Start Journey
                             </button>
                             <button className="action-chip" onClick={() => setShowHistory(true)}>
