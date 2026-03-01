@@ -240,7 +240,6 @@ function VoiceChat() {
 
             // If audio_url is present, use it directly for faster playback
             if (response.data.audio_url) {
-                const fullAudioUrl = `${window.location.origin.includes('localhost') ? 'http://localhost:5000' : ''}${response.data.audio_url}`;
                 speakText(krishnaMessage.text, krishnaMessageId, response.data.audio_url);
             } else {
                 speakText(krishnaMessage.text, krishnaMessageId);
