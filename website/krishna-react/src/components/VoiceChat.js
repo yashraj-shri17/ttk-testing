@@ -310,6 +310,13 @@ function VoiceChat() {
         // Unlock audio on first interaction for iOS
         unlockAudio();
 
+        // Prevent starting a new recording if already processing or speaking
+        if (!isListening && (isLoading || isSpeaking)) {
+            console.log("Mic blocked: Still loading or speaking");
+            if (isSpeaking) stopAudio(); // If speaking, just stop it
+            return;
+        }
+
         if (isListening) {
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
                 mediaRecorderRef.current.stop();
@@ -468,6 +475,7 @@ function VoiceChat() {
                 <VoiceControls
                     isListening={isListening}
                     isSpeaking={isSpeaking}
+                    isLoading={isLoading}
                     onToggleListening={toggleListening}
                     onStopSpeaking={stopSpeaking}
                 />
