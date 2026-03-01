@@ -25,8 +25,7 @@ function VoiceChat() {
     const mediaRecorderRef = useRef(null);
     const audioChunksRef = useRef([]);
     const audioContextRef = useRef(null);
-    const sourceNodeRef = useRef(null);
-    const persistentAudioRef = useRef(null); // Back for fallback
+    const persistentAudioRef = useRef(null); // Primary audio element for iOS compatibility
     const isAudioUnlockedRef = useRef(false);
     const isCancelledRef = useRef(false);
 
@@ -36,14 +35,6 @@ function VoiceChat() {
     const stopAudio = useCallback(() => {
         console.log("Stopping audio...");
         isCancelledRef.current = true; // Signal cancellation
-
-        if (sourceNodeRef.current) {
-            try {
-                sourceNodeRef.current.stop();
-                sourceNodeRef.current.disconnect();
-            } catch (e) { }
-            sourceNodeRef.current = null;
-        }
 
         const audio = persistentAudioRef.current;
         if (audio) {
@@ -141,10 +132,13 @@ function VoiceChat() {
         const baseUrl = API_ENDPOINTS.ASK.split('/api/ask')[0];
         const fullUrl = audioUrl ? `${baseUrl}${audioUrl}` : null;
 
-        // Try PRIMARY: HTMLAudioElement
         try {
-            console.log("Primary path: Attempting HTMLAudioElement playback");
-            if (isCancelledRef.current) throw new Error("Cancelled");
+            const audio = persistentAudioRef.current;
+            if (!audio) throw new Error("Audio element missing");
+
+            // Ensure playsinline for iOS
+            audio.setAttribute('playsinline', 'true');
+            audio.setAttribute('webkit-playsinline', 'true');
 
             let src;
             if (fullUrl) {
@@ -154,104 +148,23 @@ function VoiceChat() {
                 src = URL.createObjectURL(response.data);
             }
 
-            const audio = persistentAudioRef.current;
-            if (!audio) throw new Error("Fallback audio element missing");
-
             audio.src = src;
             audio.load();
 
             audio.onended = () => {
                 setIsSpeaking(false);
                 setActiveMessageId(null);
-                if (!fullUrl && src.startsWith('blob:')) URL.revokeObjectURL(src);
+                if (src.startsWith('blob:')) URL.revokeObjectURL(src);
             };
 
-            const playPromise = audio.play();
-            if (playPromise !== undefined) {
-                await playPromise;
-                console.log("HTMLAudioElement playback success");
-                return; // Success!
-            }
-        } catch (htmlError) {
-            if (isCancelledRef.current) {
-                setIsSpeaking(false);
-                setActiveMessageId(null);
-                return;
-            }
-            console.warn("HTMLAudioElement failed or blocked, trying Web Audio API fallback:", htmlError.message);
+            await audio.play();
+            console.log("✅ Audio working (iOS safe)");
+
+        } catch (err) {
+            console.error("❌ Playback failed:", err);
+            setIsSpeaking(false);
+            setActiveMessageId(null);
         }
-
-        // Try SECONDARY: Web Audio API Fallback
-        try {
-            if (isCancelledRef.current) {
-                setIsSpeaking(false);
-                setActiveMessageId(null);
-                return;
-            }
-
-            // 1. Ensure AudioContext is ready
-            if (!audioContextRef.current) {
-                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-                if (AudioContextClass) {
-                    audioContextRef.current = new AudioContextClass();
-                }
-            }
-
-            if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-                try {
-                    await audioContextRef.current.resume();
-                } catch (e) {
-                    console.warn("Could not resume AudioContext:", e);
-                }
-            }
-
-            let responseData;
-            if (fullUrl) {
-                const response = await axios.get(fullUrl, { responseType: 'arraybuffer' });
-                responseData = response.data;
-            } else {
-                const response = await axios.post(API_ENDPOINTS.SPEAK, { text }, { responseType: 'arraybuffer' });
-                responseData = response.data;
-            }
-
-            if (isCancelledRef.current) {
-                setIsSpeaking(false);
-                setActiveMessageId(null);
-                return;
-            }
-
-            if (audioContextRef.current) {
-                const audioBuffer = await audioContextRef.current.decodeAudioData(responseData.slice(0));
-
-                if (isCancelledRef.current) {
-                    setIsSpeaking(false);
-                    setActiveMessageId(null);
-                    return;
-                }
-
-                const source = audioContextRef.current.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(audioContextRef.current.destination);
-
-                source.onended = () => {
-                    if (sourceNodeRef.current === source) {
-                        setIsSpeaking(false);
-                        setActiveMessageId(null);
-                        sourceNodeRef.current = null;
-                    }
-                };
-
-                sourceNodeRef.current = source;
-                source.start(0);
-                console.log("Web Audio API fallback playback success");
-                return;
-            } else {
-                throw new Error("Web Audio API unavailable");
-            }
-        } catch (error) {
-            console.error('Web Audio API fallback failed:', error.message);
-        }
-
     }, [stopAudio, isSpeaking, activeMessageId]);
 
     const handleAudioUpload = async (audioBlob) => {
@@ -388,11 +301,6 @@ function VoiceChat() {
         return () => {
             console.log("Route changing/unmounting - stopping audio");
             isCancelledRef.current = true;
-            if (sourceNodeRef.current) {
-                try {
-                    sourceNodeRef.current.stop();
-                } catch (e) { }
-            }
             if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
                 mediaRecorderRef.current.stop();
             }
