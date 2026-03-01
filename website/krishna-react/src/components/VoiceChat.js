@@ -24,8 +24,9 @@ function VoiceChat() {
     const [activeMessageId, setActiveMessageId] = useState(null);
     const mediaRecorderRef = useRef(null);
     const audioChunksRef = useRef([]);
-    const audioContextRef = useRef(null); // replaces persistentAudioRef
-    const sourceNodeRef = useRef(null);   // tracks current playback
+    const audioContextRef = useRef(null);
+    const sourceNodeRef = useRef(null);
+    const persistentAudioRef = useRef(null); // Back for fallback
     const isAudioUnlockedRef = useRef(false);
     const isCancelledRef = useRef(false);
 
@@ -40,10 +41,14 @@ function VoiceChat() {
             try {
                 sourceNodeRef.current.stop();
                 sourceNodeRef.current.disconnect();
-            } catch (e) {
-                // Ignore if already stopped
-            }
+            } catch (e) { }
             sourceNodeRef.current = null;
+        }
+
+        const audio = persistentAudioRef.current;
+        if (audio) {
+            audio.pause();
+            audio.currentTime = 0;
         }
 
         setIsSpeaking(false);
@@ -51,33 +56,76 @@ function VoiceChat() {
     }, []);
 
     const unlockAudio = useCallback(async () => {
-        if (isAudioUnlockedRef.current && audioContextRef.current) return;
+        if (isAudioUnlockedRef.current) return;
 
-        console.log("Unlocking audio context for iOS...");
+        console.log("Unlocking audio systems for iOS/Mobile...");
         try {
-            // Create AudioContext on user gesture
+            // 1. Initialize/Resume AudioContext
             if (!audioContextRef.current) {
                 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-                audioContextRef.current = new AudioContextClass();
+                if (AudioContextClass) {
+                    audioContextRef.current = new AudioContextClass();
+                }
             }
 
-            if (audioContextRef.current.state === 'suspended') {
-                await audioContextRef.current.resume();
+            if (audioContextRef.current) {
+                if (audioContextRef.current.state === 'suspended') {
+                    await audioContextRef.current.resume();
+                }
+
+                // Create and play a very short silent buffer
+                // This is the key "gesture" required by iOS to allow future async audio
+                const buffer = audioContextRef.current.createBuffer(1, 1, 22050);
+                const node = audioContextRef.current.createBufferSource();
+                node.buffer = buffer;
+                node.connect(audioContextRef.current.destination);
+                node.start(0);
+                node.onended = () => {
+                    node.disconnect();
+                    console.log("Web Audio systems primed");
+                };
             }
 
-            // Play a short silent buffer to fully prime the context
-            const buffer = audioContextRef.current.createBuffer(1, 1, 22050);
-            const node = audioContextRef.current.createBufferSource();
-            node.buffer = buffer;
-            node.connect(audioContextRef.current.destination);
-            node.start(0);
+            // 2. Unlock HTMLAudioElement (Fallback)
+            if (persistentAudioRef.current) {
+                // Ensure playsinline and preload are set
+                persistentAudioRef.current.setAttribute('playsinline', 'true');
+                persistentAudioRef.current.setAttribute('webkit-playsinline', 'true');
+                persistentAudioRef.current.preload = 'auto';
+
+                // Silent wav data to "wake up" the element
+                persistentAudioRef.current.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+                const playPromise = persistentAudioRef.current.play();
+                if (playPromise !== undefined) {
+                    await playPromise.catch(e => console.warn("Silent play failed, but intent was registered:", e));
+                    persistentAudioRef.current.pause();
+                }
+            }
 
             isAudioUnlockedRef.current = true;
-            console.log("AudioContext successfully unlocked/resumed");
+            console.log("Audio systems successfully unlocked");
         } catch (err) {
-            console.warn("Audio unlock failed:", err);
+            console.error("Audio systems unlock failed:", err);
         }
     }, []);
+
+    // Global listener to unlock audio on first interaction
+    useEffect(() => {
+        const handleInteraction = () => {
+            console.log("User interaction detected, attempting to unlock audio...");
+            unlockAudio();
+        };
+
+        window.addEventListener('touchstart', handleInteraction, { once: true, capture: true });
+        window.addEventListener('click', handleInteraction, { once: true, capture: true });
+        window.addEventListener('mousedown', handleInteraction, { once: true, capture: true });
+
+        return () => {
+            window.removeEventListener('touchstart', handleInteraction, { capture: true });
+            window.removeEventListener('click', handleInteraction, { capture: true });
+            window.removeEventListener('mousedown', handleInteraction, { capture: true });
+        };
+    }, [unlockAudio]);
 
     const speakText = useCallback(async (text, messageId = null, audioUrl = null) => {
         if ((isSpeaking) && activeMessageId === messageId && messageId !== null) {
@@ -90,51 +138,120 @@ function VoiceChat() {
         setIsSpeaking(true);
         setActiveMessageId(messageId);
 
+        const baseUrl = API_ENDPOINTS.ASK.split('/api/ask')[0];
+        const fullUrl = audioUrl ? `${baseUrl}${audioUrl}` : null;
+
+        // Try PRIMARY: HTMLAudioElement
         try {
-            // Ensure AudioContext is ready
-            if (!audioContextRef.current) {
-                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-                audioContextRef.current = new AudioContextClass();
-            }
-            if (audioContextRef.current.state === 'suspended') {
-                await audioContextRef.current.resume();
-            }
+            console.log("Primary path: Attempting HTMLAudioElement playback");
+            if (isCancelledRef.current) throw new Error("Cancelled");
 
-            let audioBuffer;
-            if (audioUrl) {
-                const baseUrl = API_ENDPOINTS.ASK.split('/api/ask')[0];
-                const fullUrl = `${baseUrl}${audioUrl}`;
-                const response = await axios.get(fullUrl, { responseType: 'arraybuffer' });
-                if (isCancelledRef.current) return;
-                audioBuffer = await audioContextRef.current.decodeAudioData(response.data);
+            let src;
+            if (fullUrl) {
+                src = fullUrl;
             } else {
-                const response = await axios.post(API_ENDPOINTS.SPEAK, { text }, { responseType: 'arraybuffer' });
-                if (isCancelledRef.current) return;
-                audioBuffer = await audioContextRef.current.decodeAudioData(response.data);
+                const response = await axios.post(API_ENDPOINTS.SPEAK, { text }, { responseType: 'blob' });
+                src = URL.createObjectURL(response.data);
             }
 
-            if (isCancelledRef.current) return;
+            const audio = persistentAudioRef.current;
+            if (!audio) throw new Error("Fallback audio element missing");
 
-            const source = audioContextRef.current.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(audioContextRef.current.destination);
+            audio.src = src;
+            audio.load();
 
-            source.onended = () => {
-                if (sourceNodeRef.current === source) {
-                    setIsSpeaking(false);
-                    setActiveMessageId(null);
-                    sourceNodeRef.current = null;
-                }
+            audio.onended = () => {
+                setIsSpeaking(false);
+                setActiveMessageId(null);
+                if (!fullUrl && src.startsWith('blob:')) URL.revokeObjectURL(src);
             };
 
-            sourceNodeRef.current = source;
-            source.start(0);
-
-        } catch (error) {
-            console.error('Speech synthesis error', error);
-            setIsSpeaking(false);
-            setActiveMessageId(null);
+            const playPromise = audio.play();
+            if (playPromise !== undefined) {
+                await playPromise;
+                console.log("HTMLAudioElement playback success");
+                return; // Success!
+            }
+        } catch (htmlError) {
+            if (isCancelledRef.current) {
+                setIsSpeaking(false);
+                setActiveMessageId(null);
+                return;
+            }
+            console.warn("HTMLAudioElement failed or blocked, trying Web Audio API fallback:", htmlError.message);
         }
+
+        // Try SECONDARY: Web Audio API Fallback
+        try {
+            if (isCancelledRef.current) {
+                setIsSpeaking(false);
+                setActiveMessageId(null);
+                return;
+            }
+
+            // 1. Ensure AudioContext is ready
+            if (!audioContextRef.current) {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (AudioContextClass) {
+                    audioContextRef.current = new AudioContextClass();
+                }
+            }
+
+            if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+                try {
+                    await audioContextRef.current.resume();
+                } catch (e) {
+                    console.warn("Could not resume AudioContext:", e);
+                }
+            }
+
+            let responseData;
+            if (fullUrl) {
+                const response = await axios.get(fullUrl, { responseType: 'arraybuffer' });
+                responseData = response.data;
+            } else {
+                const response = await axios.post(API_ENDPOINTS.SPEAK, { text }, { responseType: 'arraybuffer' });
+                responseData = response.data;
+            }
+
+            if (isCancelledRef.current) {
+                setIsSpeaking(false);
+                setActiveMessageId(null);
+                return;
+            }
+
+            if (audioContextRef.current) {
+                const audioBuffer = await audioContextRef.current.decodeAudioData(responseData.slice(0));
+
+                if (isCancelledRef.current) {
+                    setIsSpeaking(false);
+                    setActiveMessageId(null);
+                    return;
+                }
+
+                const source = audioContextRef.current.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContextRef.current.destination);
+
+                source.onended = () => {
+                    if (sourceNodeRef.current === source) {
+                        setIsSpeaking(false);
+                        setActiveMessageId(null);
+                        sourceNodeRef.current = null;
+                    }
+                };
+
+                sourceNodeRef.current = source;
+                source.start(0);
+                console.log("Web Audio API fallback playback success");
+                return;
+            } else {
+                throw new Error("Web Audio API unavailable");
+            }
+        } catch (error) {
+            console.error('Web Audio API fallback failed:', error.message);
+        }
+
     }, [stopAudio, isSpeaking, activeMessageId]);
 
     const handleAudioUpload = async (audioBlob) => {
@@ -236,27 +353,35 @@ function VoiceChat() {
         }
     }, [speakText, user, sessionId]);
 
-    useEffect(() => {
-        // Welcome message - only run once
-        const timer = setTimeout(() => {
-            setMessages(prev => {
-                if (prev.length === 0) {
-                    const welcomeMsgId = Date.now();
-                    const welcomeMsg = {
-                        id: welcomeMsgId,
-                        type: 'krishna',
-                        text: 'नमस्ते! मैं कृष्ण हूँ। मुझसे कुछ भी पूछें।',
-                        timestamp: new Date()
-                    };
-                    speakText(welcomeMsg.text, welcomeMsgId);
-                    return [welcomeMsg];
-                }
-                return prev;
-            });
-        }, 1500);
+    // Start Journey Handler
+    const handleStartJourney = async () => {
+        console.log("Starting journey - unlocking audio and sending welcome...");
 
-        return () => clearTimeout(timer);
-    }, [handleVoiceInput, speakText, sessionId]);
+        // 1. Unlock audio first (critical user gesture)
+        await unlockAudio();
+
+        // 2. Set has started to true to show the interface
+        setHasStarted(true);
+
+        // 3. Send welcome message
+        const welcomeMsgId = Date.now();
+        const welcomeMsg = {
+            id: welcomeMsgId,
+            type: 'krishna',
+            text: 'नमस्ते! मैं कृष्ण हूँ। मुझसे कुछ भी पूछें।',
+            timestamp: new Date()
+        };
+
+        setMessages([welcomeMsg]);
+        speakText(welcomeMsg.text, welcomeMsgId);
+    };
+
+    // Remove automatic welcome message timer
+    useEffect(() => {
+        // We no longer send message automatically on mount
+        // It's handled by handleStartJourney
+        return () => { };
+    }, []);
 
     // Stop audio when location/route changes
     useEffect(() => {
@@ -393,11 +518,7 @@ function VoiceChat() {
                             <span className="highlight">From The Divine</span>
                         </h1>
                         <div className="quick-actions">
-                            <button className="action-chip active" onClick={() => {
-                                unlockAudio();
-                                handleVoiceInput("Tell me about Karma Yoga");
-                                setHasStarted(true);
-                            }}>
+                            <button className="action-chip active" onClick={handleStartJourney}>
                                 Start Journey
                             </button>
                             <button className="action-chip" onClick={() => setShowHistory(true)}>
@@ -459,6 +580,14 @@ function VoiceChat() {
                     setShowHistory(false);
                 }}
                 onClearHistory={clearHistory}
+            />
+
+            {/* Hidden fallback audio element */}
+            <audio
+                ref={persistentAudioRef}
+                style={{ display: 'none' }}
+                preload="auto"
+                playsInline
             />
 
         </div>

@@ -21,6 +21,13 @@ function VoiceControls({ isListening, isSpeaking, onToggleListening, onStopSpeak
             <button
                 className={`voice-button ${isListening ? 'active' : ''}`}
                 onClick={onToggleListening}
+                onTouchStart={(e) => {
+                    // Just trigger the toggle, which now includes unlockAudio
+                    // This ensures the first touch interaction on iOS unlocks the context
+                    onToggleListening();
+                    // Prevent accidental double trigger if the browser also sends a click
+                    e.preventDefault();
+                }}
                 title={isListening ? 'Stop listening' : 'Start speaking'}
             >
                 {isListening ? (
