@@ -115,6 +115,8 @@ ABSOLUTE RULES — Violations will make the answer useless:
 - Each sentence must add NEW information. If you have nothing new to say, STOP writing.
 - Total response must be under 200 words.
 - Write in Hindi (Devanagari). Be concise and direct.
+- DO NOT write the shloka citation (भगवद गीता, अध्याय, श्लोक) again after the verse. It must appear ONLY ONCE at the start of the shloka block.
+- DO NOT include any emojis in the response.
 """
 
         if tone == "crisis":
@@ -327,11 +329,11 @@ Give a direct, practical answer based on the Gita."""
         """Format the response cleanly."""
         output = []
         if result.get('llm_used') and result.get('answer'):
-            output.append("\n🪈 भगवान कृष्ण का संदेश:\n")
+            output.append("\nभगवान कृष्ण का संदेश:\n")
             output.append(result['answer'])
             output.append("\n")
         else:
-            output.append("\n⚠️ क्षमा करें, मैं अभी उत्तर देने में असमर्थ हूँ।")
+            output.append("\nक्षमा करें, मैं अभी उत्तर देने में असमर्थ हूँ।")
             output.append("संबंधित श्लोक:")
             for s in result.get('shlokas', [])[:3]:
                 output.append(f"- गीता {s['id']}: {s['meaning'][:100]}...")

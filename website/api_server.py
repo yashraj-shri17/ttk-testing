@@ -26,10 +26,128 @@ if not os.path.exists(AUDIO_DIR):
 audio_cache = {}
 import threading
 
+def _clean_text_for_tts(text: str) -> str:
+    """
+    Clean answer text before TTS:
+    1. Remove all emoji characters.
+    2. Remove any trailing shloka citation that the LLM may have duplicated at the end.
+       e.g. "...कदम उठाओ।\n\nभगवद गीता, अध्याय 2, श्लोक 47" → strip the trailing citation.
+    """
+    import re
+
+    # 1. Remove emojis (covers BMP + supplementary emoji ranges)
+    emoji_pattern = re.compile(
+        "["
+        "\U0001F600-\U0001F64F"  # emoticons
+        "\U0001F300-\U0001F5FF"  # symbols & pictographs
+        "\U0001F680-\U0001F6FF"  # transport & map
+        "\U0001F1E0-\U0001F1FF"  # flags
+        "\U00002702-\U000027B0"
+        "\U000024C2-\U0001F251"
+        "\u2600-\u26FF"          # misc symbols
+        "\u2700-\u27BF"          # dingbats
+        "\uFE00-\uFE0F"          # variation selectors
+        "\u200d"                 # zero width joiner
+        "]+",
+        flags=re.UNICODE,
+    )
+    text = emoji_pattern.sub('', text)
+
+    # 2. Strip a trailing shloka citation that appears AFTER the verse block
+    #    Pattern: optional newlines + "भगवद गीता[,، ،]*अध्याय..." at end of string
+    trailing_citation = re.compile(
+        r'\s*भगवद\s*गीता[,،\s]*अध्याय\s*\d+[,،\s]*श्लोक\s*\d+\s*$',
+        re.UNICODE
+    )
+    text = trailing_citation.sub('', text).strip()
+
+    # 3. Strip redundant shloka numbers at the end of verse lines (e.g., ॥25॥ or | 15 |)
+    #    Supports both Western (0-9) and Devanagari (०-९) digits
+    text = re.sub(r'[।॥|]\s*[0-9०-९]+\s*[।॥|]', '॥', text)
+
+    return text
+
+
+def _split_text_for_tts(text: str):
+    """
+    Split answer text into:
+      - parts_before_verse: text before the Sanskrit verse lines
+      - verse_lines: the Sanskrit verse itself (to be read slower)
+      - parts_after_verse: text after the verse block
+
+    The shloka block starts with a line like:
+      "भगवद गीता, अध्याय X, श्लोक Y"
+    followed by Sanskrit verse lines (containing | or ॥ or Devanagari + pipe characters).
+
+    Returns (before, verse, after) as strings. 'verse' may be empty if not found.
+    """
+    import re
+
+    lines = text.split('\n')
+
+    citation_pattern = re.compile(r'भगवद\s*गीता.*?अध्याय.*?श्लोक', re.UNICODE)
+    # Sanskrit lines are identified by having | (pipe used as verse separator) or ॥
+    sanskrit_line_pattern = re.compile(r'[|॥।]', re.UNICODE)
+
+    before_lines = []
+    header_lines = []   # "भगवद गीता, अध्याय X, श्लोक Y"
+    verse_lines = []
+    after_lines = []
+
+    state = 'before'  # states: before → citation → verse → after
+
+    for line in lines:
+        stripped = line.strip()
+        if state == 'before':
+            if citation_pattern.search(stripped):
+                header_lines.append(line)
+                state = 'citation'
+            else:
+                before_lines.append(line)
+        elif state == 'citation':
+            # Next non-blank line after citation header is the verse
+            if stripped == '':
+                header_lines.append(line)
+            elif sanskrit_line_pattern.search(stripped) or (
+                # Accept any Devanagari-heavy line following citation as verse
+                len([c for c in stripped if '\u0900' <= c <= '\u097F']) > len(stripped) * 0.3
+            ):
+                verse_lines.append(line)
+                state = 'verse'
+            else:
+                # Couldn't find verse — treat rest as after
+                after_lines.append(line)
+                state = 'after'
+        elif state == 'verse':
+            if stripped == '' and not verse_lines:
+                verse_lines.append(line)
+            elif sanskrit_line_pattern.search(stripped) or (
+                len([c for c in stripped if '\u0900' <= c <= '\u097F']) > len(stripped) * 0.3
+                and stripped != ''
+            ):
+                verse_lines.append(line)
+            else:
+                after_lines.append(line)
+                state = 'after'
+        else:  # after
+            after_lines.append(line)
+
+    before_text = '\n'.join(before_lines).strip()
+    # Combine header + verse for the "slow" portion
+    verse_text = '\n'.join(header_lines + verse_lines).strip()
+    after_text = '\n'.join(after_lines).strip()
+
+    return before_text, verse_text, after_text
+
+
 def _generate_audio_async(text: str) -> str:
     """
     Generate audio asynchronously and cache it.
     Returns audio_id immediately while generation happens in background.
+    
+    For shloka verses, uses a slower TTS rate so they are easier to follow.
+    For the rest of the text, normal slightly-faster rate is used.
+    Emojis and trailing duplicate shloka citations are cleaned before TTS.
     """
     audio_id = str(uuid.uuid4())
     
@@ -39,39 +157,62 @@ def _generate_audio_async(text: str) -> str:
             gen_start = time.time()
             print(f"Starting TTS generation for audio_id: {audio_id}")
             
-            # Clean text
             import re
-            clean_text = re.sub(r'<[^>]*>', '', text).replace('\n', ' ')
-            print(f"Text length: {len(clean_text)} characters")
-            
-            # Buffer to hold audio in memory
             import io
-            audio_buffer = io.BytesIO()
-            
-            async def _gen():
-                # Faster speech rate for quicker delivery (25% faster)
-                communicate = edge_tts.Communicate(clean_text, "hi-IN-MadhurNeural", rate="+25%", pitch="+0Hz")
+
+            # 1. Clean text (remove emojis, strip trailing duplicate citation)
+            cleaned = _clean_text_for_tts(text)
+            # Remove residual HTML tags
+            cleaned = re.sub(r'<[^>]*>', '', cleaned).strip()
+            print(f"Text length after cleaning: {len(cleaned)} characters")
+
+            # 2. Split into before-verse, verse (slow), after-verse parts
+            before_text, verse_text, after_text = _split_text_for_tts(cleaned)
+
+            async def _gen_part(part_text: str, rate: str) -> bytes:
+                buf = io.BytesIO()
+                communicate = edge_tts.Communicate(part_text, "hi-IN-MadhurNeural", rate=rate, pitch="+0Hz")
                 async for chunk in communicate.stream():
                     if chunk["type"] == "audio":
-                        audio_buffer.write(chunk["data"])
-            
+                        buf.write(chunk["data"])
+                return buf.getvalue()
+
+            async def _gen_all():
+                """Generate all parts and concatenate audio bytes."""
+                parts = []
+
+                if before_text:
+                    parts.append(await _gen_part(before_text, "+12%"))
+
+                if verse_text:
+                    # Shloka is spoken at a natural, consistent pace
+                    parts.append(await _gen_part(verse_text, "+12%"))
+
+                if after_text:
+                    parts.append(await _gen_part(after_text, "+12%"))
+
+                if not parts:
+                    # Fallback: generate whole cleaned text at consistent rate
+                    parts.append(await _gen_part(cleaned, "+12%"))
+
+                return b''.join(parts)
+
             # Run async generation
             tts_start = time.time()
-            asyncio.run(_gen())
+            audio_bytes = asyncio.run(_gen_all())
             tts_time = time.time() - tts_start
-            
-            # Reset buffer pointer
-            audio_buffer.seek(0)
-            
+
             # Cache the audio data
-            audio_cache[audio_id] = audio_buffer.getvalue()
-            
+            audio_cache[audio_id] = audio_bytes
+
             total_time = time.time() - gen_start
             audio_size = len(audio_cache[audio_id]) / 1024
             print(f"TTS complete: {tts_time:.2f}s, Total: {total_time:.2f}s, Size: {audio_size:.1f}KB")
-            
+
         except Exception as e:
             print(f"Audio generation error: {e}")
+            import traceback
+            traceback.print_exc()
             audio_cache[audio_id] = None
     
     # Start generation in background thread
@@ -79,6 +220,7 @@ def _generate_audio_async(text: str) -> str:
     thread.start()
     
     return audio_id
+
 
 
 app = Flask(__name__)
@@ -301,6 +443,7 @@ def ask_question():
 def speak_text():
     """
     Generate audio from text using Neural TTS in-memory (no files saved).
+    Handles shloka speed and cleaning consistently with background generation.
     """
     try:
         data = request.get_json()
@@ -309,27 +452,39 @@ def speak_text():
         if not text:
             return jsonify({'error': 'No text provided'}), 400
 
-        # Voices: hi-IN-MadhurNeural (Male)
-        voice = "hi-IN-MadhurNeural" 
-        
-        # Buffer to hold audio in memory
         import io
-        audio_buffer = io.BytesIO()
+        import re
 
-        async def _generate():
-            # Speed up speech rate for faster delivery (25% faster)
-            communicate = edge_tts.Communicate(text, voice, rate="+25%", pitch="+0Hz")
+        # 1. Clean and Split
+        cleaned = _clean_text_for_tts(text)
+        cleaned = re.sub(r'<[^>]*>', '', cleaned).strip()
+        before_text, verse_text, after_text = _split_text_for_tts(cleaned)
+
+        async def _gen_part(part_text: str, rate: str) -> bytes:
+            buf = io.BytesIO()
+            communicate = edge_tts.Communicate(part_text, "hi-IN-MadhurNeural", rate=rate, pitch="+0Hz")
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
-                    audio_buffer.write(chunk["data"])
+                    buf.write(chunk["data"])
+            return buf.getvalue()
 
-        # Run async generation
-        asyncio.run(_generate())
+        async def _gen_all():
+            parts = []
+            if before_text:
+                parts.append(await _gen_part(before_text, "+12%"))
+            if verse_text:
+                parts.append(await _gen_part(verse_text, "+12%"))
+            if after_text:
+                parts.append(await _gen_part(after_text, "+12%"))
+            if not parts:
+                parts.append(await _gen_part(cleaned, "+12%"))
+            return b''.join(parts)
 
-        # Reset buffer pointer to beginning
+        # Run generation
+        audio_bytes = asyncio.run(_gen_all())
+        audio_buffer = io.BytesIO(audio_bytes)
         audio_buffer.seek(0)
 
-        # Return file from memory
         return send_file(
             audio_buffer,
             mimetype="audio/mpeg",
@@ -339,6 +494,8 @@ def speak_text():
 
     except Exception as e:
         print(f"TTS Error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/transcribe', methods=['POST'])

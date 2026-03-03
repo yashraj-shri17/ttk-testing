@@ -8,38 +8,68 @@ function MessageHistory({ messages, isOpen, onClose, onClearHistory, onSpeak, ac
     const formatMessage = (text) => {
         const lines = text.split('\n');
         let formatted = [];
-        let shlokaLines = [];
+        let currentBatch = [];
+        let isShlokaBatch = false;
+
+        const isCitation = (l) => l.includes('भगवद गीता') || (l.includes('अध्याय') && l.includes('श्लोक'));
+        const isVerseLine = (l) => l.match(/[।॥|]/);
+
+        const flushBatch = (index) => {
+            if (currentBatch.length === 0) return;
+
+            if (isShlokaBatch) {
+                formatted.push(
+                    <div key={`shloka-${index}`} className="shloka">
+                        {currentBatch.map((line, i) => (
+                            <div key={i}>{line}</div>
+                        ))}
+                    </div>
+                );
+            } else {
+                currentBatch.forEach((line, i) => {
+                    if (line.trim()) {
+                        formatted.push(<p key={`${index}-${i}`}>{line}</p>);
+                    }
+                });
+            }
+            currentBatch = [];
+            isShlokaBatch = false;
+        };
 
         lines.forEach((line, index) => {
-            if (line.match(/[।॥]/)) {
-                shlokaLines.push(line);
+            const trimmed = line.trim();
+            if (!trimmed) {
+                flushBatch(index);
+                return;
+            }
+
+            const isC = isCitation(trimmed);
+            const isV = isVerseLine(trimmed);
+
+            if (isC || isV) {
+                // If we were in a normal text batch, flush it first
+                if (currentBatch.length > 0 && !isShlokaBatch) {
+                    flushBatch(index);
+                }
+
+                isShlokaBatch = true;
+
+                // Strip redundant shloka number at the end (e.g., ॥25॥ or | 25 |)
+                let cleanLine = line;
+                if (isV) {
+                    cleanLine = line.replace(/[।॥|]\s*[0-9०-९]+\s*[।॥|]\s*$/, '॥').trim();
+                }
+                currentBatch.push(cleanLine);
             } else {
-                if (shlokaLines.length > 0) {
-                    formatted.push(
-                        <div key={`shloka-${index}`} className="shloka">
-                            {shlokaLines.map((sl, i) => (
-                                <div key={i}>{sl}</div>
-                            ))}
-                        </div>
-                    );
-                    shlokaLines = [];
+                // Normal text line
+                if (isShlokaBatch) {
+                    flushBatch(index);
                 }
-                if (line.trim()) {
-                    formatted.push(<p key={index}>{line}</p>);
-                }
+                currentBatch.push(line);
             }
         });
 
-        if (shlokaLines.length > 0) {
-            formatted.push(
-                <div key="shloka-end" className="shloka">
-                    {shlokaLines.map((sl, i) => (
-                        <div key={i}>{sl}</div>
-                    ))}
-                </div>
-            );
-        }
-
+        flushBatch('final');
         return formatted;
     };
 
