@@ -6,7 +6,9 @@ function MessageHistory({ messages, isOpen, onClose, onClearHistory, onSpeak, ac
     const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
     const formatMessage = (text) => {
-        const lines = text.split('\n');
+        const rawLines = text.split('\n').map(l => l.trim()).filter(l => l !== '');
+        if (rawLines.length === 0) return null;
+
         const sections = {
             general: [],
             shloka: [],
@@ -14,58 +16,64 @@ function MessageHistory({ messages, isOpen, onClose, onClearHistory, onSpeak, ac
             steps: []
         };
 
-        let currentSection = 'general';
-
         const isCitation = (l) => l.includes('भगवद गीता') || (l.includes('अध्याय') && l.includes('श्लोक'));
-        const isVerseLine = (l) => l.match(/[।॥|]/);
-        const isStepLine = (l) => {
-            const cleanLine = l.replace(/^[\s*\-#]+/, '').trim();
-            // Catch numbered lists or clear bullets
-            if (/^\d+[\.\)]\s/.test(l) || /^\*\s/.test(l) || /^-\s/.test(l)) return true;
 
-            const lowerLine = cleanLine.toLowerCase();
-            const triggers = ['मार्गदर्शन', 'उपाय', 'कदम', 'steps', 'here are', 'निम्नलिखित', 'अतः', 'आगे बढ़ो', 'ये कदम', 'अभ्यास करो', 'याद रखें', 'ध्यान दें'];
+        let citationIdx = rawLines.findIndex(isCitation);
+        let shlokaEnd = citationIdx;
 
-            // Check if line ends with colon OR is relatively short AND contains a trigger
-            if (cleanLine.endsWith(':') && triggers.some(t => lowerLine.includes(t))) return true;
-            if (cleanLine.length < 50 && triggers.some(t => lowerLine.includes(t))) return true;
-
-            return false;
-        };
-
-        lines.forEach((line) => {
-            const trimmed = line.trim();
-
-            // Handle state transitions
-            if (currentSection === 'general') {
-                if (isCitation(trimmed) || isVerseLine(trimmed)) {
-                    currentSection = 'shloka';
-                }
-            } else if (currentSection === 'shloka') {
-                if (trimmed && !isCitation(trimmed) && !isVerseLine(trimmed)) {
-                    currentSection = 'explanation';
+        if (citationIdx !== -1) {
+            let foundDoubleDanda = false;
+            for (let i = citationIdx + 1; i < Math.min(citationIdx + 5, rawLines.length); i++) {
+                if (rawLines[i].includes('॥') || rawLines[i].includes('||')) {
+                    shlokaEnd = i;
+                    foundDoubleDanda = true;
+                    break;
                 }
             }
-
-            if (currentSection === 'explanation') {
-                if (trimmed && (isStepLine(trimmed) || (sections.explanation.length > 0 && isStepLine(trimmed)))) {
-                    currentSection = 'steps';
+            if (!foundDoubleDanda) {
+                for (let i = citationIdx + 1; i < Math.min(citationIdx + 3, rawLines.length); i++) {
+                    if (!/^\d+[\.\)]/.test(rawLines[i]) && !/^(मार्गदर्शन|उपाय|कदम|steps|अतः|आगे बढ़ो)/i.test(rawLines[i])) {
+                        shlokaEnd = i;
+                    }
                 }
             }
+        }
 
-            if (!trimmed) return;
+        let firstStepIdx = -1;
+        let startSearch = shlokaEnd !== -1 ? shlokaEnd + 1 : (citationIdx !== -1 ? citationIdx + 1 : 0);
+        for (let i = startSearch; i < rawLines.length; i++) {
+            if (/^\d+[\.\)]\s/.test(rawLines[i]) || /^\*\s/.test(rawLines[i]) || /^-\s/.test(rawLines[i])) {
+                firstStepIdx = i;
+                break;
+            }
+        }
 
-            // Add content to respective section
-            if (currentSection === 'shloka') {
-                let cleanLine = trimmed;
-                if (isVerseLine(cleanLine)) {
-                    cleanLine = cleanLine.replace(/[।॥|]\s*[0-9०-९]+\s*[।॥|]\s*$/, '॥').trim();
-                }
-                sections.shloka.push(cleanLine);
+        let stepsStart = firstStepIdx;
+        if (firstStepIdx > startSearch) {
+            const prevLine = rawLines[firstStepIdx - 1];
+            if (prevLine.length < 100 && (prevLine.endsWith(':') || /मार्गदर्शन|उपाय|कदम|steps|अतः|आगे बढ़ो|अभ्यास करो|याद रखें|ध्यान दें|ये कदम/i.test(prevLine))) {
+                stepsStart = firstStepIdx - 1;
+            }
+        }
+
+        if (citationIdx !== -1) {
+            sections.general = rawLines.slice(0, citationIdx);
+            sections.shloka = rawLines.slice(citationIdx, shlokaEnd + 1).map(l => l.replace(/[।॥|]\s*[0-9०-९]+\s*[।॥|]\s*$/, '॥'));
+
+            if (stepsStart !== -1) {
+                sections.explanation = rawLines.slice(shlokaEnd + 1, stepsStart);
+                sections.steps = rawLines.slice(stepsStart);
             } else {
-                sections[currentSection].push(trimmed);
+                sections.explanation = rawLines.slice(shlokaEnd + 1);
             }
-        });
+        } else {
+            if (stepsStart !== -1) {
+                sections.general = rawLines.slice(0, stepsStart);
+                sections.steps = rawLines.slice(stepsStart);
+            } else {
+                sections.general = rawLines;
+            }
+        }
 
         return (
             <div className="response-boxes">
