@@ -7,70 +7,84 @@ function MessageHistory({ messages, isOpen, onClose, onClearHistory, onSpeak, ac
 
     const formatMessage = (text) => {
         const lines = text.split('\n');
-        let formatted = [];
-        let currentBatch = [];
-        let isShlokaBatch = false;
+        const sections = {
+            general: [],
+            shloka: [],
+            explanation: [],
+            steps: []
+        };
+
+        let currentSection = 'general';
 
         const isCitation = (l) => l.includes('भगवद गीता') || (l.includes('अध्याय') && l.includes('श्लोक'));
         const isVerseLine = (l) => l.match(/[।॥|]/);
+        // Step markers: 1., 1), *, -, or keywords
+        const isStepLine = (l) => /^\s*(\d+[\.\)]|\*|-)\s/.test(l) || /^(मार्गदर्शन|उपाय|कदम|steps|Here are|निम्नलिखित|अतः):?/i.test(l) || l.includes('इन बातों का ध्यान रखें') || l.includes('इन बातों पर ध्यान दें');
 
-        const flushBatch = (index) => {
-            if (currentBatch.length === 0) return;
-
-            if (isShlokaBatch) {
-                formatted.push(
-                    <div key={`shloka-${index}`} className="shloka">
-                        {currentBatch.map((line, i) => (
-                            <div key={i}>{line}</div>
-                        ))}
-                    </div>
-                );
-            } else {
-                currentBatch.forEach((line, i) => {
-                    if (line.trim()) {
-                        formatted.push(<p key={`${index}-${i}`}>{line}</p>);
-                    }
-                });
-            }
-            currentBatch = [];
-            isShlokaBatch = false;
-        };
-
-        lines.forEach((line, index) => {
+        lines.forEach((line) => {
             const trimmed = line.trim();
-            if (!trimmed) {
-                flushBatch(index);
-                return;
+
+            // Handle state transitions
+            if (currentSection === 'general') {
+                if (isCitation(trimmed) || isVerseLine(trimmed)) {
+                    currentSection = 'shloka';
+                }
+            } else if (currentSection === 'shloka') {
+                if (trimmed && !isCitation(trimmed) && !isVerseLine(trimmed)) {
+                    currentSection = 'explanation';
+                }
             }
 
-            const isC = isCitation(trimmed);
-            const isV = isVerseLine(trimmed);
-
-            if (isC || isV) {
-                // If we were in a normal text batch, flush it first
-                if (currentBatch.length > 0 && !isShlokaBatch) {
-                    flushBatch(index);
+            if (currentSection === 'explanation') {
+                if (trimmed && (isStepLine(trimmed) || (sections.explanation.length > 0 && isStepLine(trimmed)))) {
+                    currentSection = 'steps';
                 }
+            }
 
-                isShlokaBatch = true;
+            if (!trimmed) return;
 
-                // Strip redundant shloka number at the end (e.g., ॥25॥ or | 25 |)
-                let cleanLine = line;
-                if (isV) {
-                    cleanLine = line.replace(/[।॥|]\s*[0-9०-९]+\s*[।॥|]\s*$/, '॥').trim();
+            // Add content to respective section
+            if (currentSection === 'shloka') {
+                let cleanLine = trimmed;
+                if (isVerseLine(cleanLine)) {
+                    cleanLine = cleanLine.replace(/[।॥|]\s*[0-9०-९]+\s*[।॥|]\s*$/, '॥').trim();
                 }
-                currentBatch.push(cleanLine);
+                sections.shloka.push(cleanLine);
             } else {
-                // Normal text line
-                if (isShlokaBatch) {
-                    flushBatch(index);
-                }
-                currentBatch.push(line);
+                sections[currentSection].push(trimmed);
             }
         });
 
-        flushBatch('final');
-        return formatted;
+        return (
+            <div className="response-boxes">
+                {sections.general.length > 0 && (
+                    <div className="response-box general-box">
+                        <div className="box-title">आरंभ (Introduction)</div>
+                        {sections.general.map((l, i) => <p key={`g-${i}`}>{l}</p>)}
+                    </div>
+                )}
+                {sections.shloka.length > 0 && (
+                    <div className="response-box shloka-box">
+                        <div className="box-title">श्लोक (Divine Verse)</div>
+                        <div className="shloka-content">
+                            {sections.shloka.map((l, i) => <div key={`s-${i}`}>{l}</div>)}
+                        </div>
+                    </div>
+                )}
+                {sections.explanation.length > 0 && (
+                    <div className="response-box explanation-box">
+                        <div className="box-title">अर्थ (Explanation)</div>
+                        {sections.explanation.map((l, i) => <p key={`e-${i}`}>{l}</p>)}
+                    </div>
+                )}
+                {sections.steps.length > 0 && (
+                    <div className="response-box steps-box">
+                        <div className="box-title">मार्गदर्शन (Guidance & Steps)</div>
+                        {sections.steps.map((l, i) => <p key={`st-${i}`}>{l}</p>)}
+                    </div>
+                )}
+            </div>
+        );
     };
 
     const handleClearHistory = () => {
