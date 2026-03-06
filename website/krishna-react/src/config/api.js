@@ -12,6 +12,7 @@ export const API_ENDPOINTS = {
 
     // AI Chat
     ASK: `${API_BASE_URL}/api/ask`,
+    HISTORY: `${API_BASE_URL}/api/history`,
 
     // Audio (if needed)
     SPEAK: `${API_BASE_URL}/api/speak`,

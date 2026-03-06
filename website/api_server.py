@@ -393,10 +393,10 @@ def ask_question():
         
         # Get user's conversation history if logged in
         conversation_history = []
-        if user_id:
-            # Filter history by session_id if provided
-            conversation_history = get_user_history(user_id, session_id=session_id, limit=5)
-            print(f"Retrieved {len(conversation_history)} previous conversations for user {user_id} (Session: {session_id})")
+        # if user_id:
+        #     # Filter history by session_id if provided (Disabled for faster response times)
+        #     conversation_history = get_user_history(user_id, session_id=session_id, limit=5)
+        #     print(f"Retrieved {len(conversation_history)} previous conversations for user {user_id} (Session: {session_id})")
         
         # Get answer from GitaAPI with conversation context
         import time
@@ -596,6 +596,11 @@ def index():
     })
 
 import sqlite3
+try:
+    import psycopg2
+    from psycopg2 import sql
+except ImportError:
+    psycopg2 = None
 from werkzeug.security import generate_password_hash, check_password_hash
 import json
 from datetime import datetime
@@ -607,6 +612,58 @@ import time
 # Allow overriding db path for production environments (like Render persistent disks)
 import os
 DB_NAME = os.environ.get("DB_PATH", "users.db")
+DATABASE_URL = os.environ.get("DATABASE_URL")
+USE_POSTGRES = bool(DATABASE_URL and psycopg2)
+
+pg_pool = None
+if USE_POSTGRES:
+    try:
+        from psycopg2.pool import ThreadedConnectionPool
+        # Pool with min 1 and max 20 connections
+        pg_pool = ThreadedConnectionPool(1, 20, DATABASE_URL)
+        print("✅ PostgreSQL Connection Pool initialized successfully.")
+    except Exception as e:
+        print(f"❌ Error initializing DB pool: {e}")
+
+def execute_db(query, params=(), commit=False, fetchone=False, fetchall=False):
+    import sqlite3
+    conn = None
+    is_pooled = False
+    
+    if USE_POSTGRES:
+        if query.count('?') > 0:
+            query = query.replace('?', '%s')
+            
+        if pg_pool:
+            conn = pg_pool.getconn()
+            is_pooled = True
+        else:
+            conn = psycopg2.connect(DATABASE_URL)
+    else:
+        conn = sqlite3.connect(DB_NAME)
+    
+    c = conn.cursor()
+    try:
+        c.execute(query, params)
+        result = None
+        if fetchone:
+            result = c.fetchone()
+        elif fetchall:
+            result = c.fetchall()
+        if commit:
+            conn.commit()
+        return result
+    except Exception as e:
+        if commit:
+            conn.rollback()
+        raise e
+    finally:
+        c.close()
+        if is_pooled:
+            pg_pool.putconn(conn)
+        else:
+            conn.close()
+
 
 # Rate limiting setup
 login_attempts = defaultdict(list)
@@ -667,86 +724,126 @@ def validate_email(email):
     return True, None
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    
-    # Users table
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        )
-    ''')
-    
-    # Conversations table
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS conversations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            session_id TEXT,
-            question TEXT NOT NULL,
-            answer TEXT NOT NULL,
-            shlokas TEXT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    # Check if session_id column exists (migration for existing DB)
-    try:
-        c.execute('SELECT session_id FROM conversations LIMIT 1')
-    except sqlite3.OperationalError:
-        print("Migrating DB: Adding session_id column...")
-        c.execute('ALTER TABLE conversations ADD COLUMN session_id TEXT')
-    
-    # Password reset tokens table
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS reset_tokens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            token TEXT UNIQUE NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            expires_at DATETIME NOT NULL,
-            used BOOLEAN DEFAULT 0,
-            FOREIGN KEY (user_id) REFERENCES users (id)
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
+    if USE_POSTGRES:
+        conn = psycopg2.connect(DATABASE_URL)
+        c = conn.cursor()
+        
+        # Postgres tables using SERIAL
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL
+            )
+        ''')
+        
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS conversations (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users (id),
+                session_id TEXT,
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                shlokas TEXT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # Add session_id if missing (simple check)
+        try:
+            c.execute('SELECT session_id FROM conversations LIMIT 1')
+        except Exception:
+            conn.rollback()
+            print("Migrating Postgres DB: Adding session_id column...")
+            c.execute('ALTER TABLE conversations ADD COLUMN session_id TEXT')
+            conn.commit()
+            
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS reset_tokens (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users (id),
+                token TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                used BOOLEAN DEFAULT FALSE
+            )
+        ''')
+        conn.commit()
+        conn.close()
+    else:
+        import sqlite3
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        
+        # SQLite tables
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                email TEXT UNIQUE NOT NULL,
+                password TEXT NOT NULL
+            )
+        ''')
+        
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users (id),
+                session_id TEXT,
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL,
+                shlokas TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        try:
+            c.execute('SELECT session_id FROM conversations LIMIT 1')
+        except sqlite3.OperationalError:
+            print("Migrating SQLite DB: Adding session_id column...")
+            c.execute('ALTER TABLE conversations ADD COLUMN session_id TEXT')
+            
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS reset_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users (id),
+                token TEXT UNIQUE NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                expires_at DATETIME NOT NULL,
+                used BOOLEAN DEFAULT 0
+            )''')
+        conn.commit()
+        conn.close()
+
 
 def get_user_history(user_id, session_id=None, limit=5):
     """Get recent conversation history for a user, optionally filtered by session."""
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
     
     if session_id:
-        # If session_id provided, only get history for THAT session
-        c.execute('''
+        history = execute_db('''
             SELECT question, answer, shlokas, timestamp 
             FROM conversations 
             WHERE user_id = ? AND session_id = ?
             ORDER BY timestamp DESC 
             LIMIT ?
-        ''', (user_id, session_id, limit))
+        ''', (user_id, session_id, limit), fetchall=True)
     else:
-        # Fallback to global history (or maybe just empty if we want strict sessions?)
-        c.execute('''
+        history = execute_db('''
             SELECT question, answer, shlokas, timestamp 
             FROM conversations 
             WHERE user_id = ? 
             ORDER BY timestamp DESC 
             LIMIT ?
-        ''', (user_id, limit))
-        
-    history = c.fetchall()
-    conn.close()
+        ''', (user_id, limit), fetchall=True)
     
     # Format history for LLM context
     formatted_history = []
     for q, a, shlokas, ts in reversed(history):  # Reverse to get chronological order
+        # Convert datetime objects to string if needed
+        if hasattr(ts, 'isoformat'):
+            ts = ts.isoformat()
+            
         formatted_history.append({
             'question': q,
             'answer': a,
@@ -756,15 +853,16 @@ def get_user_history(user_id, session_id=None, limit=5):
 
 def save_conversation(user_id, question, answer, shlokas, session_id=None):
     """Save a conversation to the database."""
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
+    from datetime import datetime, timedelta
+    # Generate current time in IST (UTC+5:30)
+    ist_time = datetime.utcnow() + timedelta(hours=5, minutes=30)
+    ist_str = ist_time.strftime('%Y-%m-%d %H:%M:%S')
+    
     shlokas_json = json.dumps(shlokas) if shlokas else None
-    c.execute('''
-        INSERT INTO conversations (user_id, session_id, question, answer, shlokas)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (user_id, session_id, question, answer, shlokas_json))
-    conn.commit()
-    conn.close()
+    execute_db('''
+        INSERT INTO conversations (user_id, session_id, question, answer, shlokas, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (user_id, session_id, question, answer, shlokas_json, ist_str), commit=True)
 
 def generate_reset_token():
     """Generate a secure random token."""
@@ -779,14 +877,10 @@ def create_reset_token(user_id):
     # Token expires in 1 hour
     expires_at = datetime.now() + timedelta(hours=1)
     
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''
+    execute_db('''
         INSERT INTO reset_tokens (user_id, token, expires_at)
         VALUES (?, ?, ?)
-    ''', (user_id, token, expires_at.isoformat()))
-    conn.commit()
-    conn.close()
+    ''', (user_id, token, expires_at.isoformat()), commit=True)
     
     return token
 
@@ -794,15 +888,11 @@ def validate_reset_token(token):
     """Validate a reset token and return user_id if valid."""
     from datetime import datetime
     
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''
+    result = execute_db('''
         SELECT user_id, expires_at, used 
         FROM reset_tokens 
         WHERE token = ?
-    ''', (token,))
-    result = c.fetchone()
-    conn.close()
+    ''', (token,), fetchone=True)
     
     if not result:
         return None, "Invalid reset token"
@@ -821,18 +911,42 @@ def validate_reset_token(token):
 
 def mark_token_used(token):
     """Mark a reset token as used."""
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute('''
-        UPDATE reset_tokens 
-        SET used = 1 
-        WHERE token = ?
-    ''', (token,))
-    conn.commit()
-    conn.close()
+    if USE_POSTGRES:
+        execute_db("UPDATE reset_tokens SET used = TRUE WHERE token = ?", (token,), commit=True)
+    else:
+        execute_db("UPDATE reset_tokens SET used = 1 WHERE token = ?", (token,), commit=True)
 
 # Initialize DB
 init_db()
+
+@app.route('/api/history', methods=['GET'])
+def get_user_chat_history():
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'User ID is required', 'success': False}), 400
+    try:
+        # Fetch up to 50 previous messages
+        history = get_user_history(int(user_id), limit=50)
+        # Reverse history so oldest is first
+        history.reverse()
+        return jsonify({'success': True, 'history': history})
+    except Exception as e:
+        print(f"Error fetching history: {e}")
+        return jsonify({'error': 'Failed to fetch history', 'success': False}), 500
+
+@app.route('/api/history', methods=['DELETE'])
+def clear_user_chat_history():
+    data = request.get_json() or {}
+    user_id = data.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'User ID is required', 'success': False}), 400
+    
+    try:
+        execute_db("DELETE FROM conversations WHERE user_id = ?", (user_id,), commit=True)
+        return jsonify({'success': True, 'message': 'History cleared'})
+    except Exception as e:
+        print(f"Error clearing history: {e}")
+        return jsonify({'error': 'Failed to clear history', 'success': False}), 500
 
 @app.route('/api/signup', methods=['POST'])
 def signup():
@@ -877,15 +991,17 @@ def signup():
     hashed_pw = generate_password_hash(password)
 
     try:
-        conn = sqlite3.connect(DB_NAME)
-        c = conn.cursor()
-        c.execute('INSERT INTO users (name, email, password) VALUES (?, ?, ?)', (name, email, hashed_pw))
-        conn.commit()
-        conn.close()
+        execute_db('INSERT INTO users (name, email, password) VALUES (?, ?, ?)', (name, email, hashed_pw), commit=True)
         
         print(f"New user registered: {email}")
         return jsonify({'message': 'Account created successfully!', 'success': True}), 201
-    except sqlite3.IntegrityError:
+    except Exception as e:
+        if 'UNIQUE' in str(e).upper() or 'INTEGRITY' in str(e).upper():
+            return jsonify({'error': 'This email is already registered', 'success': False}), 409
+        print(f"Signup error: {e}")
+        return jsonify({'error': 'Registration failed. Please try again.', 'success': False}), 500
+    # Dummy block to avoid syntax errors if previous except was replaced
+    except ValueError:
         return jsonify({'error': 'This email is already registered', 'success': False}), 409
     except Exception as e:
         print(f"Signup error: {e}")
@@ -917,11 +1033,7 @@ def login():
         return jsonify({'error': 'Invalid email format', 'success': False}), 400
 
     try:
-        conn = sqlite3.connect(DB_NAME)
-        c = conn.cursor()
-        c.execute('SELECT id, name, email, password FROM users WHERE email = ?', (email,))
-        user = c.fetchone()
-        conn.close()
+        user = execute_db('SELECT id, name, email, password FROM users WHERE email = ?', (email,), fetchone=True)
 
         if user and check_password_hash(user[3], password):
             print(f"Successful login: {email}")
@@ -956,11 +1068,7 @@ def forgot_password():
         return jsonify({'error': 'Invalid email format', 'success': False}), 400
     
     try:
-        conn = sqlite3.connect(DB_NAME)
-        c = conn.cursor()
-        c.execute('SELECT id FROM users WHERE email = ?', (email,))
-        user = c.fetchone()
-        conn.close()
+        user = execute_db('SELECT id FROM users WHERE email = ?', (email,), fetchone=True)
         
         # Always return success to prevent email enumeration
         # But only create token if user exists
@@ -1014,11 +1122,7 @@ def reset_password():
     try:
         # Update password
         hashed_pw = generate_password_hash(new_password)
-        conn = sqlite3.connect(DB_NAME)
-        c = conn.cursor()
-        c.execute('UPDATE users SET password = ? WHERE id = ?', (hashed_pw, user_id))
-        conn.commit()
-        conn.close()
+        execute_db('UPDATE users SET password = ? WHERE id = ?', (hashed_pw, user_id), commit=True)
         
         # Mark token as used
         mark_token_used(token)

@@ -288,12 +288,39 @@ function VoiceChat() {
         speakText(welcomeMsg.text, welcomeMsgId);
     };
 
-    // Remove automatic welcome message timer
+    // Load previous history on mount
     useEffect(() => {
-        // We no longer send message automatically on mount
-        // It's handled by handleStartJourney
-        return () => { };
-    }, []);
+        if (user?.id) {
+            const fetchHistory = async () => {
+                try {
+                    const response = await axios.get(API_ENDPOINTS.HISTORY, {
+                        params: { user_id: user.id }
+                    });
+                    if (response.data.success && response.data.history.length > 0) {
+                        const loadedMessages = [];
+                        response.data.history.forEach((msg, idx) => {
+                            loadedMessages.push({
+                                id: `hist_${idx}_q`,
+                                type: 'user',
+                                text: msg.question,
+                                timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
+                            });
+                            loadedMessages.push({
+                                id: `hist_${idx}_a`,
+                                type: 'krishna',
+                                text: msg.answer,
+                                timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
+                            });
+                        });
+                        setMessages(loadedMessages);
+                    }
+                } catch (err) {
+                    console.error("Failed to fetch history", err);
+                }
+            };
+            fetchHistory();
+        }
+    }, [user?.id]);
 
     // Stop audio when location/route changes
     useEffect(() => {
@@ -374,11 +401,23 @@ function VoiceChat() {
         stopAudio();
     };
 
-    const clearHistory = () => {
+    const clearHistory = async () => {
         // Stop any ongoing speech
         if (isSpeaking) {
             stopAudio();
         }
+
+        // Call API to delete history from DB
+        if (user?.id) {
+            try {
+                await axios.delete(API_ENDPOINTS.HISTORY, {
+                    data: { user_id: user.id }
+                });
+            } catch (err) {
+                console.error("Failed to clear DB history", err);
+            }
+        }
+
         // Clear all messages
         setMessages([]);
         // Reset to initial state
