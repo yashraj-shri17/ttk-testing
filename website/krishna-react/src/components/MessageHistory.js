@@ -18,8 +18,20 @@ function MessageHistory({ messages, isOpen, onClose, onClearHistory, onSpeak, ac
 
         const isCitation = (l) => l.includes('भगवद गीता') || (l.includes('अध्याय') && l.includes('श्लोक'));
         const isVerseLine = (l) => l.match(/[।॥|]/);
-        // Step markers: 1., 1), *, -, or keywords
-        const isStepLine = (l) => /^\s*(\d+[\.\)]|\*|-)\s/.test(l) || /^(मार्गदर्शन|उपाय|कदम|steps|Here are|निम्नलिखित|अतः):?/i.test(l) || l.includes('इन बातों का ध्यान रखें') || l.includes('इन बातों पर ध्यान दें');
+        const isStepLine = (l) => {
+            const cleanLine = l.replace(/^[\s*\-#]+/, '').trim();
+            // Catch numbered lists or clear bullets
+            if (/^\d+[\.\)]\s/.test(l) || /^\*\s/.test(l) || /^-\s/.test(l)) return true;
+
+            const lowerLine = cleanLine.toLowerCase();
+            const triggers = ['मार्गदर्शन', 'उपाय', 'कदम', 'steps', 'here are', 'निम्नलिखित', 'अतः', 'आगे बढ़ो', 'ये कदम', 'अभ्यास करो', 'याद रखें', 'ध्यान दें'];
+
+            // Check if line ends with colon OR is relatively short AND contains a trigger
+            if (cleanLine.endsWith(':') && triggers.some(t => lowerLine.includes(t))) return true;
+            if (cleanLine.length < 50 && triggers.some(t => lowerLine.includes(t))) return true;
+
+            return false;
+        };
 
         lines.forEach((line) => {
             const trimmed = line.trim();
