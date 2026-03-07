@@ -32,7 +32,7 @@ function MessageHistory({ messages, isOpen, onClose, onClearHistory, onSpeak, ac
             }
             if (!foundDoubleDanda) {
                 for (let i = citationIdx + 1; i < Math.min(citationIdx + 3, rawLines.length); i++) {
-                    if (!/^\d+[\.\)]/.test(rawLines[i]) && !/^(मार्गदर्शन|उपाय|कदम|steps|अतः|आगे बढ़ो)/i.test(rawLines[i])) {
+                    if (!/^\d+[.)]/.test(rawLines[i]) && !/^(मार्गदर्शन|उपाय|कदम|steps|अतः|आगे बढ़ो)/i.test(rawLines[i])) {
                         shlokaEnd = i;
                     }
                 }
@@ -42,7 +42,7 @@ function MessageHistory({ messages, isOpen, onClose, onClearHistory, onSpeak, ac
         let firstStepIdx = -1;
         let startSearch = shlokaEnd !== -1 ? shlokaEnd + 1 : (citationIdx !== -1 ? citationIdx + 1 : 0);
         for (let i = startSearch; i < rawLines.length; i++) {
-            if (/^\d+[\.\)]\s/.test(rawLines[i]) || /^\*\s/.test(rawLines[i]) || /^-\s/.test(rawLines[i])) {
+            if (/^\d+[.)]\s/.test(rawLines[i]) || /^\*\s/.test(rawLines[i]) || /^-\s/.test(rawLines[i])) {
                 firstStepIdx = i;
                 break;
             }
