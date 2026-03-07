@@ -43,7 +43,7 @@ function AdminDashboard() {
 
                     let hint = "Backend returned invalid JSON.";
                     if (text.includes("<!DOCTYPE html>") || text.includes("<html")) {
-                        hint = "The API call was intercepted and returned an HTML webpage. This usually means the API URL in Vercel (.env) is incorrect, pointing to the frontend itself, or the backend host is showing a 'Spining Up / Suspended' webpage.";
+                        hint = `Vercel intercepted the API call and returned the Frontend HTML instead of backend data. This happens if REACT_APP_API_URL is wrong. URL used: ${API_ENDPOINTS.ADMIN_METRICS}`;
                     }
 
                     throw new Error(`${hint} Data snippet: ${text.substring(0, 40)}...`);

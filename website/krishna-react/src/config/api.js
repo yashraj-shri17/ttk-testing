@@ -1,7 +1,9 @@
 // API Configuration
 // This file centralizes all API endpoint URLs
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+let API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// Remove trailing slash if present to avoid double-slash issues in endpoints
+API_BASE_URL = API_BASE_URL.replace(/\/$/, '');
 
 export const API_ENDPOINTS = {
     // Authentication
@@ -17,6 +19,9 @@ export const API_ENDPOINTS = {
     // Audio (if needed)
     SPEAK: `${API_BASE_URL}/api/speak`,
     TRANSCRIBE: `${API_BASE_URL}/api/transcribe`,
+
+    // Admin
+    ADMIN_METRICS: `${API_BASE_URL}/api/admin/metrics`,
 };
 
 export default API_BASE_URL;
