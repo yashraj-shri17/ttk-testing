@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { API_ENDPOINTS } from '../config/api';
 import './AdminDashboard.css';
 
 function AdminDashboard() {
@@ -12,8 +13,6 @@ function AdminDashboard() {
     const [expandedUser, setExpandedUser] = useState(null);
     const [selectedInteraction, setSelectedInteraction] = useState(null);
 
-    const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
-
     useEffect(() => {
         const isAdmin = user && user.email === 'abhishek@justlearnindia.in';
         if (!isAdmin) {
@@ -23,7 +22,7 @@ function AdminDashboard() {
 
         const fetchMetrics = async () => {
             try {
-                const response = await fetch(`${API_BASE_URL}/admin/metrics?user_id=${user.id}`);
+                const response = await fetch(`${API_ENDPOINTS.ADMIN_METRICS}?user_id=${user.id}`);
 
                 // If backend returns a 404 page (e.g. backend not deployed yet), handled safely
                 if (!response.ok) {
@@ -47,7 +46,7 @@ function AdminDashboard() {
             } catch (err) {
                 console.error('Error fetching admin metrics:', err);
                 if (err.message.includes('fetch')) {
-                    setError(`Network error: Could not reach backend at ${API_BASE_URL}. Is it running?`);
+                    setError(`Network error: Could not reach backend at ${API_ENDPOINTS.ADMIN_METRICS}. Is it running?`);
                 } else {
                     setError(`Backend issue: ${err.message}`);
                 }
@@ -57,7 +56,7 @@ function AdminDashboard() {
         };
 
         fetchMetrics();
-    }, [user, navigate, API_BASE_URL]);
+    }, [user, navigate]);
 
     const toggleUserExpand = (userId) => {
         setExpandedUser(expandedUser === userId ? null : userId);
