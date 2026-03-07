@@ -365,21 +365,106 @@
         font-size: 0.8rem;
     }
 
-    .logs-table th,
-    .logs-table td {
-        padding: 12px 10px;
-        font-size: 0.85rem;
+    /* Transform Table for Mobile */
+    .logs-table-container {
+        padding: 0;
+        margin: 0;
+        overflow: visible;
     }
 
-    .question-cell,
-    .answer-cell {
-        max-width: 150px;
+    .logs-table,
+    .logs-table thead,
+    .logs-table tbody,
+    .logs-table th,
+    .logs-table td,
+    .logs-table tr {
+        display: block;
+    }
+
+    .logs-table thead tr {
+        position: absolute;
+        top: -9999px;
+        left: -9999px;
+    }
+
+    .logs-table tr {
+        border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+        padding: 15px 10px;
+        position: relative;
+        background: rgba(255, 255, 255, 0.02);
+        margin: 10px;
+        border-radius: 12px;
+    }
+
+    .logs-table td {
+        border: none;
+        padding: 8px 5px 8px 120px;
+        /* Space for labels */
+        position: relative;
+        min-height: 40px;
+        display: flex;
+        align-items: center;
+        white-space: normal;
+        text-align: left;
+        max-width: none !important;
+        overflow: visible;
+        text-overflow: unset;
+    }
+
+    .logs-table td:before {
+        position: absolute;
+        left: 10px;
+        width: 100px;
+        padding-right: 10px;
+        white-space: nowrap;
+        font-weight: 700;
+        color: var(--primary-color);
+        content: attr(data-label);
+        font-size: 0.8rem;
+        text-transform: uppercase;
+    }
+
+    /* Assign Labels (must match JS order) */
+    .serial-cell:before {
+        content: "S.No";
+    }
+
+    .time-cell:before {
+        content: "Time";
+    }
+
+    .question-cell:before {
+        content: "Question";
+    }
+
+    .model-cell:before {
+        content: "Model";
+    }
+
+    .answer-cell:before {
+        content: "Snippet";
+    }
+
+    .action-cell:before {
+        content: "Option";
+    }
+
+    .serial-cell {
+        background: rgba(var(--primary-color-rgb), 0.1);
+        border-radius: 8px;
+        margin-bottom: 10px;
+    }
+
+    .action-cell {
+        justify-content: flex-end;
+        padding-top: 15px;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
     }
 }
 
 @media (max-width: 480px) {
     .admin-dashboard {
-        padding: 90px 10px 30px;
+        padding: 80px 10px 30px;
     }
 
     .dashboard-header h1 {
@@ -387,40 +472,39 @@
     }
 
     .dashboard-logs {
-        padding: 20px 15px;
+        padding: 15px 10px;
     }
 
     .user-stats {
-        flex-wrap: wrap;
-        gap: 10px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
     }
 
-    .conv-count {
+    .logs-table td {
+        padding-left: 100px;
+        font-size: 0.85rem;
+    }
+
+    .logs-table td:before {
+        width: 85px;
         font-size: 0.75rem;
-        padding: 2px 8px;
     }
 
     .admin-modal {
-        width: 95%;
-        max-height: 85vh;
-    }
-
-    .modal-header {
-        padding: 15px;
+        width: 98%;
+        height: 100%;
+        max-height: none;
+        border-radius: 0;
     }
 
     .modal-body {
-        padding: 15px;
-    }
-
-    .admin-q-block p,
-    .admin-a-block p {
-        font-size: 0.9rem;
         padding: 10px;
     }
 
     .view-btn {
-        padding: 4px 8px;
-        font-size: 0.75rem;
+        width: 100%;
+        padding: 12px;
+        text-align: center;
     }
 }

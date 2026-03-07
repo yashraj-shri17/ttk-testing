@@ -127,35 +127,39 @@ function AdminDashboard() {
 
                             {expandedUser === interaction.user_id && (
                                 <div className="user-conversations">
-                                    <table className="logs-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Timestamp</th>
-                                                <th>User Asked</th>
-                                                <th>Model</th>
-                                                <th>AI Response Snippet</th>
-                                                <th>Action</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {interaction.conversations.map((conv) => (
-                                                <tr key={conv.id}>
-                                                    <td>{new Date(conv.timestamp).toLocaleString()}</td>
-                                                    <td className="question-cell" title={conv.question}>{conv.question}</td>
-                                                    <td><span className="model-badge">{conv.model_used}</span></td>
-                                                    <td className="answer-cell" title={conv.answer}>{conv.answer}</td>
-                                                    <td>
-                                                        <button
-                                                            className="view-btn"
-                                                            onClick={() => setSelectedInteraction(conv)}
-                                                        >
-                                                            View Full Chat
-                                                        </button>
-                                                    </td>
+                                    <div className="logs-table-container">
+                                        <table className="logs-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>S.No</th>
+                                                    <th>Timestamp</th>
+                                                    <th>User Asked</th>
+                                                    <th>Model</th>
+                                                    <th>AI Response Snippet</th>
+                                                    <th>Action</th>
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                            </thead>
+                                            <tbody>
+                                                {interaction.conversations.map((conv, idx) => (
+                                                    <tr key={conv.id}>
+                                                        <td className="serial-cell" data-label="S.No">{idx + 1}</td>
+                                                        <td className="time-cell" data-label="Time">{new Date(conv.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</td>
+                                                        <td className="question-cell" data-label="Question" title={conv.question}>{conv.question}</td>
+                                                        <td className="model-cell" data-label="Model"><span className="model-badge">{conv.model_used}</span></td>
+                                                        <td className="answer-cell" data-label="Snippet" title={conv.answer}>{conv.answer}</td>
+                                                        <td className="action-cell" data-label="Option">
+                                                            <button
+                                                                className="view-btn"
+                                                                onClick={() => setSelectedInteraction(conv)}
+                                                            >
+                                                                View Full Chat
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                             )}
                         </div>
