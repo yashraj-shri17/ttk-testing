@@ -24,16 +24,33 @@ function AdminDashboard() {
         const fetchMetrics = async () => {
             try {
                 const response = await fetch(`${API_BASE_URL}/admin/metrics?user_id=${user.id}`);
-                const data = await response.json();
 
-                if (response.ok && data.success) {
-                    setMetrics(data.metrics);
-                } else {
-                    setError(data.error || 'Failed to load metrics');
+                // If backend returns a 404 page (e.g. backend not deployed yet), handled safely
+                if (!response.ok) {
+                    throw new Error(`Backend API returned ${response.status} ${response.statusText}`);
                 }
+
+                // Safely parse JSON
+                const text = await response.text();
+                try {
+                    const data = JSON.parse(text);
+                    if (data.success) {
+                        setMetrics(data.metrics);
+                    } else {
+                        setError(data.error || 'Failed to load metrics from API');
+                    }
+                } catch (parseError) {
+                    console.error('API returned non-JSON:', text.substring(0, 100));
+                    throw new Error('Backend returned invalid JSON. Please ensure the backend server is fully deployed and running the latest code.');
+                }
+
             } catch (err) {
                 console.error('Error fetching admin metrics:', err);
-                setError('Network error reading backend data');
+                if (err.message.includes('fetch')) {
+                    setError(`Network error: Could not reach backend at ${API_BASE_URL}. Is it running?`);
+                } else {
+                    setError(`Backend issue: ${err.message}`);
+                }
             } finally {
                 setLoading(false);
             }
