@@ -39,8 +39,14 @@ function AdminDashboard() {
                         setError(data.error || 'Failed to load metrics from API');
                     }
                 } catch (parseError) {
-                    console.error('API returned non-JSON:', text.substring(0, 100));
-                    throw new Error('Backend returned invalid JSON. Please ensure the backend server is fully deployed and running the latest code.');
+                    console.error('API returned non-JSON:', text.substring(0, 150));
+
+                    let hint = "Backend returned invalid JSON.";
+                    if (text.includes("<!DOCTYPE html>") || text.includes("<html")) {
+                        hint = "The API call was intercepted and returned an HTML webpage. This usually means the API URL in Vercel (.env) is incorrect, pointing to the frontend itself, or the backend host is showing a 'Spining Up / Suspended' webpage.";
+                    }
+
+                    throw new Error(`${hint} Data snippet: ${text.substring(0, 40)}...`);
                 }
 
             } catch (err) {
