@@ -12,6 +12,7 @@ import ResetPassword from './pages/ResetPassword';
 import Profile from './pages/Profile';
 import Contact from './pages/Contact';
 import Privacy from './pages/Privacy';
+import AdminDashboard from './pages/AdminDashboard';
 import VoiceChat from './components/VoiceChat';
 import ScrollToTop from './components/ScrollToTop';
 import BackToTopButton from './components/BackToTopButton';
@@ -49,6 +50,7 @@ function App() {
                                 <Route element={<ProtectedRoute />}>
                                     <Route path="/chat" element={<VoiceChat />} />
                                     <Route path="/profile" element={<Profile />} />
+                                    <Route path="/admin" element={<AdminDashboard />} />
                                 </Route>
                             </Routes>
                             <Footer />

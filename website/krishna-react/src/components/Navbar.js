@@ -57,6 +57,11 @@ function Navbar() {
                     {user ? (
                         <>
                             <Link to="/chat" className={`nav-link ${location.pathname === '/chat' ? 'active' : ''}`} onClick={closeMenu}>Chat</Link>
+
+                            {user.email === 'abhishek@justlearnindia.in' && (
+                                <Link to="/admin" className={`nav-link ${location.pathname === '/admin' ? 'active' : ''}`} style={{ color: '#ff9800', fontWeight: 'bold' }} onClick={closeMenu}>Admin Panel</Link>
+                            )}
+
                             <Link to="/profile" className="nav-link profile-link" onClick={closeMenu}>
                                 <div className="nav-avatar">
                                     {getInitials(user.name)}

@@ -1,0 +1,172 @@
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import './AdminDashboard.css';
+
+function AdminDashboard() {
+    const { user } = useAuth();
+    const navigate = useNavigate();
+    const [metrics, setMetrics] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [expandedUser, setExpandedUser] = useState(null);
+    const [selectedInteraction, setSelectedInteraction] = useState(null);
+
+    const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+
+    useEffect(() => {
+        const isAdmin = user && user.email === 'abhishek@justlearnindia.in';
+        if (!isAdmin) {
+            navigate('/');
+            return;
+        }
+
+        const fetchMetrics = async () => {
+            try {
+                const response = await fetch(`${API_BASE_URL}/admin/metrics?user_id=${user.id}`);
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    setMetrics(data.metrics);
+                } else {
+                    setError(data.error || 'Failed to load metrics');
+                }
+            } catch (err) {
+                console.error('Error fetching admin metrics:', err);
+                setError('Network error reading backend data');
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchMetrics();
+    }, [user, navigate, API_BASE_URL]);
+
+    const toggleUserExpand = (userId) => {
+        setExpandedUser(expandedUser === userId ? null : userId);
+    };
+
+    if (loading) {
+        return (
+            <div className="admin-dashboard">
+                <div className="dashboard-header">
+                    <h1>Admin Dashboard</h1>
+                    <p>Loading analytics and metrics...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="admin-dashboard">
+                <div className="dashboard-header">
+                    <h1>Admin Dashboard</h1>
+                    <div className="error-message">{error}</div>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="admin-dashboard">
+            <div className="dashboard-header">
+                <h1>Admin Dashboard</h1>
+                <p>Welcome back, {user?.name.split(' ')[0]}! Here are the system analytics.</p>
+            </div>
+
+            <div className="dashboard-metrics">
+                <div className="metric-card glass">
+                    <h3>Total Registered Users</h3>
+                    <div className="metric-value">{metrics?.total_users || 0}</div>
+                </div>
+                <div className="metric-card glass">
+                    <h3>Total Conversations</h3>
+                    <div className="metric-value">{metrics?.total_conversations || 0}</div>
+                </div>
+            </div>
+
+            <div className="dashboard-logs">
+                <h2>User Interactions</h2>
+                <div className="users-list">
+                    {metrics?.user_interactions?.map((interaction) => (
+                        <div key={interaction.user_id} className={`user-accordion ${expandedUser === interaction.user_id ? 'expanded' : ''}`}>
+                            <div className="user-header" onClick={() => toggleUserExpand(interaction.user_id)}>
+                                <div className="user-info">
+                                    <span className="user-name">{interaction.user_name}</span>
+                                    <span className="user-email">{interaction.user_email}</span>
+                                </div>
+                                <div className="user-stats">
+                                    <span className="conv-count">{interaction.conversation_count} conversations</span>
+                                    <span className="last-active">Last active: {new Date(interaction.last_active).toLocaleDateString()}</span>
+                                    <span className="expand-icon">{expandedUser === interaction.user_id ? '▼' : '▶'}</span>
+                                </div>
+                            </div>
+
+                            {expandedUser === interaction.user_id && (
+                                <div className="user-conversations">
+                                    <table className="logs-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Timestamp</th>
+                                                <th>User Asked</th>
+                                                <th>Model</th>
+                                                <th>AI Response Snippet</th>
+                                                <th>Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {interaction.conversations.map((conv) => (
+                                                <tr key={conv.id}>
+                                                    <td>{new Date(conv.timestamp).toLocaleString()}</td>
+                                                    <td className="question-cell" title={conv.question}>{conv.question}</td>
+                                                    <td><span className="model-badge">{conv.model_used}</span></td>
+                                                    <td className="answer-cell" title={conv.answer}>{conv.answer}</td>
+                                                    <td>
+                                                        <button
+                                                            className="view-btn"
+                                                            onClick={() => setSelectedInteraction(conv)}
+                                                        >
+                                                            View Full Chat
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+
+                    {!metrics?.user_interactions?.length && (
+                        <p style={{ textAlign: 'center', padding: '20px' }}>No user interactions recorded yet.</p>
+                    )}
+                </div>
+            </div>
+            {/* Full Conversation Modal */}
+            {selectedInteraction && (
+                <div className="modal-overlay" onClick={() => setSelectedInteraction(null)}>
+                    <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h3>Conversation Detail</h3>
+                            <button className="close-btn" onClick={() => setSelectedInteraction(null)}>×</button>
+                        </div>
+                        <div className="modal-body">
+                            <div className="admin-q-block">
+                                <h4>User Question</h4>
+                                <p>{selectedInteraction.question}</p>
+                            </div>
+                            <div className="admin-a-block">
+                                <h4>Krishna AI Response ({selectedInteraction.model_used})</h4>
+                                <p>{selectedInteraction.answer}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
+export default AdminDashboard;

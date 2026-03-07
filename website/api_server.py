@@ -919,6 +919,92 @@ def mark_token_used(token):
 # Initialize DB
 init_db()
 
+def seed_admin_user():
+    admin_email = 'abhishek@justlearnindia.in'
+    default_password = 'AdminPassword123!'
+    hashed_pw = generate_password_hash(default_password)
+    
+    try:
+        user = execute_db('SELECT id FROM users WHERE email = ?', (admin_email,), fetchone=True)
+        if not user:
+            execute_db('INSERT INTO users (name, email, password) VALUES (?, ?, ?)', 
+                       ('Abhishek Admin', admin_email, hashed_pw), commit=True)
+            print(f"✅ Admin user seeded: {admin_email} / {default_password}")
+    except Exception as e:
+        print(f"Admin seeding error: {e}")
+
+# Seed the admin user
+seed_admin_user()
+
+@app.route('/api/admin/metrics', methods=['GET'])
+def get_admin_metrics():
+    user_id = request.args.get('user_id')
+    
+    try:
+        # Verify user is the admin
+        user = execute_db('SELECT email FROM users WHERE id = ?', (user_id,), fetchone=True)
+        if not user or user[0] != 'abhishek@justlearnindia.in':
+            return jsonify({'error': 'Unauthorized', 'success': False}), 403
+            
+        # Total users
+        total_users_row = execute_db('SELECT COUNT(*) FROM users', fetchone=True)
+        total_users = total_users_row[0] if total_users_row else 0
+        
+        # Total conversations
+        total_conv_row = execute_db('SELECT COUNT(*) FROM conversations', fetchone=True)
+        total_conv = total_conv_row[0] if total_conv_row else 0
+        
+        # Group conversations by user
+        all_convs = execute_db('''
+            SELECT c.id, u.id, u.name, u.email, c.question, c.answer, c.timestamp 
+            FROM conversations c
+            JOIN users u ON c.user_id = u.id
+            ORDER BY c.timestamp DESC
+        ''', fetchall=True)
+        
+        user_grouped = {}
+        for conv in all_convs:
+            uid = conv[1]
+            if uid not in user_grouped:
+                user_grouped[uid] = {
+                    'user_id': uid,
+                    'user_name': conv[2],
+                    'user_email': conv[3],
+                    'conversation_count': 0,
+                    'last_active': None,
+                    'conversations': []
+                }
+            
+            ts = conv[6]
+            if hasattr(ts, 'isoformat'):
+                ts = ts.isoformat()
+                
+            if user_grouped[uid]['last_active'] is None:
+                user_grouped[uid]['last_active'] = ts
+                
+            user_grouped[uid]['conversations'].append({
+                'id': conv[0],
+                'question': conv[4],
+                'answer': conv[5],
+                'timestamp': ts,
+                'model_used': 'llama-3.3-70b-versatile'
+            })
+            user_grouped[uid]['conversation_count'] += 1
+            
+        users_list = list(user_grouped.values())
+            
+        return jsonify({
+            'success': True, 
+            'metrics': {
+                'total_users': total_users,
+                'total_conversations': total_conv,
+                'user_interactions': users_list
+            }
+        })
+    except Exception as e:
+        print(f"Error fetching admin metrics: {e}")
+        return jsonify({'error': str(e), 'success': False}), 500
+
 @app.route('/api/history', methods=['GET'])
 def get_user_chat_history():
     user_id = request.args.get('user_id')
