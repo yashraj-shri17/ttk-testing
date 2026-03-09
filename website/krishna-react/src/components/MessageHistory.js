@@ -16,25 +16,28 @@ function MessageHistory({ messages, isOpen, onClose, onClearHistory, onSpeak, ac
             steps: []
         };
 
-        const isCitation = (l) => l.includes('भगवद गीता') || (l.includes('अध्याय') && l.includes('श्लोक'));
+        const isCitation = (l) => {
+            const hiCitation = l.includes('भगवद गीता') || (l.includes('अध्याय') && l.includes('श्लोक'));
+            const enCitation = l.toLowerCase().includes('bhagavad gita') || (l.toLowerCase().includes('chapter') && l.toLowerCase().includes('shloka'));
+            return hiCitation || enCitation;
+        };
 
         let citationIdx = rawLines.findIndex(isCitation);
         let shlokaEnd = citationIdx;
 
         if (citationIdx !== -1) {
             let foundDoubleDanda = false;
-            for (let i = citationIdx + 1; i < Math.min(citationIdx + 5, rawLines.length); i++) {
-                if (rawLines[i].includes('॥') || rawLines[i].includes('||')) {
+            for (let i = citationIdx + 1; i < Math.min(citationIdx + 6, rawLines.length); i++) {
+                // Check for Sanskrit markers or Devanagari heavy line
+                const devanagariCount = (rawLines[i].match(/[\u0900-\u097F]/g) || []).length;
+                const isDevanagariHeavy = devanagariCount > rawLines[i].length * 0.4;
+
+                if (rawLines[i].includes('॥') || rawLines[i].includes('||') || isDevanagariHeavy) {
                     shlokaEnd = i;
                     foundDoubleDanda = true;
+                } else if (foundDoubleDanda) {
+                    // Stop if we already found the shloka block and this line isn't part of it
                     break;
-                }
-            }
-            if (!foundDoubleDanda) {
-                for (let i = citationIdx + 1; i < Math.min(citationIdx + 3, rawLines.length); i++) {
-                    if (!/^\d+[.)]/.test(rawLines[i]) && !/^(मार्गदर्शन|उपाय|कदम|steps|अतः|आगे बढ़ो)/i.test(rawLines[i])) {
-                        shlokaEnd = i;
-                    }
                 }
             }
         }
@@ -51,7 +54,8 @@ function MessageHistory({ messages, isOpen, onClose, onClearHistory, onSpeak, ac
         let stepsStart = firstStepIdx;
         if (firstStepIdx > startSearch) {
             const prevLine = rawLines[firstStepIdx - 1];
-            if (prevLine.length < 100 && (prevLine.endsWith(':') || /मार्गदर्शन|उपाय|कदम|steps|अतः|आगे बढ़ो|अभ्यास करो|याद रखें|ध्यान दें|ये कदम/i.test(prevLine))) {
+            const stepKeywordRegex = /मार्गदर्शन|उपाय|कदम|steps|अतः|आगे बढ़ो|अभ्यास करो|याद रखें|ध्यान दें|ये कदम|guidance|action|practice|follow|remember/i;
+            if (prevLine.length < 100 && (prevLine.endsWith(':') || stepKeywordRegex.test(prevLine))) {
                 stepsStart = firstStepIdx - 1;
             }
         }
@@ -85,9 +89,9 @@ function MessageHistory({ messages, isOpen, onClose, onClearHistory, onSpeak, ac
                 )}
                 {sections.shloka.length > 0 && (
                     <div className="response-box shloka-box">
-                        <div className="box-title">श्लोक (Divine Verse)</div>
+                        <div className="box-title">श्लोक (Divine Verse & Citation)</div>
                         <div className="shloka-content">
-                            {sections.shloka.map((l, i) => <div key={`s-${i}`}>{l}</div>)}
+                            {sections.shloka.map((l, i) => <div key={`s-${i}`} className={i === 0 ? "shloka-header" : "shloka-line"}>{l}</div>)}
                         </div>
                     </div>
                 )}
@@ -99,7 +103,7 @@ function MessageHistory({ messages, isOpen, onClose, onClearHistory, onSpeak, ac
                 )}
                 {sections.steps.length > 0 && (
                     <div className="response-box steps-box">
-                        <div className="box-title">मार्गदर्शन (Guidance & Steps)</div>
+                        <div className="box-title">मार्गदर्शन (Guidance & Action)</div>
                         {sections.steps.map((l, i) => <p key={`st-${i}`}>{l}</p>)}
                     </div>
                 )}

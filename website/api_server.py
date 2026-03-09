@@ -101,42 +101,49 @@ def _split_text_for_tts(text: str):
 
     for line in lines:
         stripped = line.strip()
+        if not stripped:
+            if state == 'before': before_lines.append(line)
+            elif state == 'citation': header_lines.append(line)
+            elif state == 'verse':
+                # Only keep blank lines in verse if we already started collecting verse lines
+                if verse_lines: verse_lines.append(line)
+            else: after_lines.append(line)
+            continue
+
         if state == 'before':
-            if citation_pattern_hi.search(stripped):
+            if citation_pattern_hi.search(stripped) or citation_pattern_en.search(stripped):
                 header_lines.append(line)
                 state = 'citation'
-                is_english = False
-            elif citation_pattern_en.search(stripped):
-                header_lines.append(line)
-                state = 'citation'
-                is_english = True
+                if citation_pattern_en.search(stripped):
+                    is_english = True
             else:
                 before_lines.append(line)
+        
         elif state == 'citation':
-            # Next non-blank line after citation header is the verse
-            if stripped == '':
-                header_lines.append(line)
-            elif sanskrit_line_pattern.search(stripped) or (
-                # Accept any Devanagari-heavy line following citation as verse
-                len([c for c in stripped if '\u0900' <= c <= '\u097F']) > len(stripped) * 0.3
+            # After citation, we expect the Sanskrit verse
+            if sanskrit_line_pattern.search(stripped) or (
+                len([c for c in stripped if '\u0900' <= c <= '\u097F']) > len(stripped) * 0.25
             ):
                 verse_lines.append(line)
                 state = 'verse'
             else:
-                # Couldn't find verse — treat rest as after
-                after_lines.append(line)
-                state = 'after'
+                # If it's not a verse line, maybe it's another citation or the start of 'after'
+                if citation_pattern_hi.search(stripped) or citation_pattern_en.search(stripped):
+                    header_lines.append(line)
+                else:
+                    after_lines.append(line)
+                    state = 'after'
+        
         elif state == 'verse':
-            if stripped == '' and not verse_lines:
-                verse_lines.append(line)
-            elif sanskrit_line_pattern.search(stripped) or (
-                len([c for c in stripped if '\u0900' <= c <= '\u097F']) > len(stripped) * 0.3
-                and stripped != ''
+            # Check if line is still part of the verse
+            if sanskrit_line_pattern.search(stripped) or (
+                len([c for c in stripped if '\u0900' <= c <= '\u097F']) > len(stripped) * 0.25
             ):
                 verse_lines.append(line)
             else:
                 after_lines.append(line)
                 state = 'after'
+        
         else:  # after
             after_lines.append(line)
 
