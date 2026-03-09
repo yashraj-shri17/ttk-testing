@@ -1,191 +1,379 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { API_ENDPOINTS } from '../config/api';
 import './AdminDashboard.css';
 
+// Simple icons as SVG constants
+const Icons = {
+    Stats: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>,
+    History: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>,
+    Shield: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>,
+    Users: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>,
+    Alert: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+};
+
 function AdminDashboard() {
     const { user } = useAuth();
     const navigate = useNavigate();
+    const [activeTab, setActiveTab] = useState('stats');
     const [metrics, setMetrics] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [expandedUser, setExpandedUser] = useState(null);
     const [selectedInteraction, setSelectedInteraction] = useState(null);
 
+    // Form states
+    const [adminForm, setAdminForm] = useState({ email: '', password: '' });
+    const [userForm, setUserForm] = useState({ email: '', password: '', access: true });
+    const [actionLoading, setActionLoading] = useState(null);
+    const [actionMsg, setActionMsg] = useState({ type: '', text: '' });
+
+    const fetchMetrics = useCallback(async () => {
+        if (!user) return;
+        try {
+            const response = await fetch(`${API_ENDPOINTS.ADMIN_METRICS}?user_id=${user.id}`);
+            if (!response.ok) throw new Error(`API error ${response.status}`);
+            const data = await response.json();
+            if (data.success) {
+                setMetrics(data.metrics);
+            } else {
+                setError(data.error || 'Failed to fetch metrics');
+            }
+        } catch (err) {
+            console.error('Metrics fetch error:', err);
+            setError('System link lost. Backend connection failed.');
+        } finally {
+            setLoading(false);
+        }
+    }, [user]);
+
     useEffect(() => {
-        const isAdmin = user && user.email === 'abhishek@justlearnindia.in';
+        const isAdmin = user && (user.role === 'admin' || user.email === 'abhishek@justlearnindia.in');
         if (!isAdmin) {
             navigate('/');
             return;
         }
-
-        const fetchMetrics = async () => {
-            try {
-                const response = await fetch(`${API_ENDPOINTS.ADMIN_METRICS}?user_id=${user.id}`);
-
-                // If backend returns a 404 page (e.g. backend not deployed yet), handled safely
-                if (!response.ok) {
-                    throw new Error(`Backend API returned ${response.status} ${response.statusText}`);
-                }
-
-                // Safely parse JSON
-                const text = await response.text();
-                try {
-                    const data = JSON.parse(text);
-                    if (data.success) {
-                        setMetrics(data.metrics);
-                    } else {
-                        setError(data.error || 'Failed to load metrics from API');
-                    }
-                } catch (parseError) {
-                    console.error('API returned non-JSON:', text.substring(0, 150));
-
-                    let hint = "Backend returned invalid JSON.";
-                    if (text.includes("<!DOCTYPE html>") || text.includes("<html")) {
-                        hint = `Vercel intercepted the API call and returned the Frontend HTML instead of backend data. This happens if REACT_APP_API_URL is wrong. URL used: ${API_ENDPOINTS.ADMIN_METRICS}`;
-                    }
-
-                    throw new Error(`${hint} Data snippet: ${text.substring(0, 40)}...`);
-                }
-
-            } catch (err) {
-                console.error('Error fetching admin metrics:', err);
-                if (err.message.includes('fetch')) {
-                    setError(`Network error: Could not reach backend at ${API_ENDPOINTS.ADMIN_METRICS}. Is it running?`);
-                } else {
-                    setError(`Backend issue: ${err.message}`);
-                }
-            } finally {
-                setLoading(false);
-            }
-        };
-
         fetchMetrics();
-    }, [user, navigate]);
+    }, [user, navigate, fetchMetrics]);
 
-    const toggleUserExpand = (userId) => {
-        setExpandedUser(expandedUser === userId ? null : userId);
+    const handleAction = async (type) => {
+        setActionLoading(type);
+        setActionMsg({ type: '', text: '' });
+
+        const endpoint = type === 'admin' ? API_ENDPOINTS.CREATE_ADMIN : API_ENDPOINTS.GRANT_ACCESS;
+        const payload = type === 'admin'
+            ? { admin_id: user.id, ...adminForm }
+            : { admin_id: user.id, ...userForm };
+
+        try {
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            if (data.success) {
+                setActionMsg({ type: 'success', text: `CORE_SYNC: ${data.message.toUpperCase()}.` });
+                if (type === 'admin') setAdminForm({ email: '', password: '' });
+                else setUserForm({ email: '', password: '', access: true });
+                fetchMetrics();
+            } else {
+                setActionMsg({ type: 'error', text: `ERROR: ${data.error.toUpperCase()}.` });
+            }
+        } catch (err) {
+            setActionMsg({ type: 'error', text: 'SYNC_ERROR: NETWORK REQUEST FAILED.' });
+        } finally {
+            setActionLoading(null);
+        }
     };
 
     if (loading) {
         return (
             <div className="admin-dashboard">
-                <div className="dashboard-header">
-                    <h1>Admin Dashboard</h1>
-                    <p>Loading analytics and metrics...</p>
+                <div className="loader-container">
+                    <div className="crystal-loader"></div>
                 </div>
             </div>
         );
     }
 
-    if (error) {
-        return (
-            <div className="admin-dashboard">
-                <div className="dashboard-header">
-                    <h1>Admin Dashboard</h1>
-                    <div className="error-message">{error}</div>
-                </div>
-            </div>
-        );
-    }
+    const renderContent = () => {
+        switch (activeTab) {
+            case 'stats':
+                return (
+                    <div className="stats-view">
+                        <div className="stats-grid">
+                            <div className="stat-item admin-glass-card">
+                                <div className="stat-label">TOTAL REGISTERED NODES</div>
+                                <div className="stat-value">{metrics?.total_users || 0}</div>
+                            </div>
+                            <div className="stat-item admin-glass-card">
+                                <div className="stat-label">ACTIVE INTERACTIONS (24H)</div>
+                                <div className="stat-value">{metrics?.today_users || 0}</div>
+                            </div>
+                            <div className="stat-item admin-glass-card">
+                                <div className="stat-label">TOTAL NEURAL PATHS</div>
+                                <div className="stat-value">{metrics?.total_conversations || 0}</div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            case 'history':
+                if (expandedUser) {
+                    const node = metrics?.user_interactions?.find(u => u.user_id === expandedUser);
+                    return (
+                        <div className="history-detail-view">
+                            <div className="detail-header">
+                                <button className="back-btn" onClick={() => setExpandedUser(null)}>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+                                    Back to Registry
+                                </button>
+                                <h2>NEURAL STREAM: {node?.user_name}</h2>
+                            </div>
+                            <div className="registry-container">
+                                <table className="registry-table">
+                                    <thead>
+                                        <tr>
+                                            <th>TIMESTAMP</th>
+                                            <th>PROMPT</th>
+                                            <th>AI SYNTHESIS</th>
+                                            <th>ACTION</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {node?.conversations?.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).map((conv) => (
+                                            <tr key={conv.id} className="registry-row">
+                                                <td>{new Date(conv.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</td>
+                                                <td className="table-text-cell">{conv.question}</td>
+                                                <td className="table-text-cell">{conv.answer}</td>
+                                                <td>
+                                                    <button className="view-btn" onClick={() => setSelectedInteraction({ ...conv, user_email: node.user_email })}>EXAMINE</button>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {(!node?.conversations || node.conversations.length === 0) && (
+                                            <tr><td colSpan="4" style={{ textAlign: 'center', padding: '40px' }}>No neural paths detected for this node.</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    );
+                }
+                return (
+                    <div className="history-view">
+                        <div className="registry-container">
+                            <table className="registry-table">
+                                <thead>
+                                    <tr>
+                                        <th>NEURAL ID</th>
+                                        <th>INTERACTION COUNT</th>
+                                        <th>LAST PULSED</th>
+                                        <th>ACTION</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {metrics?.user_interactions?.filter(u => u.conversation_count > 0).map((node) => (
+                                        <tr key={node.user_id} className="registry-row summary-row">
+                                            <td>
+                                                <div className="neural-id-cell">
+                                                    <span className="node-name">{node.user_name}</span>
+                                                    <span className="node-email">{node.user_email}</span>
+                                                </div>
+                                            </td>
+                                            <td>{node.conversation_count} Segments</td>
+                                            <td>{node.last_active === 'Never' ? 'Never' : new Date(node.last_active).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
+                                            <td>
+                                                <button className="retrieve-stream-btn" onClick={() => setExpandedUser(node.user_id)}>
+                                                    Retrieve Stream <span className="arrow">›</span>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {(!metrics?.user_interactions || metrics.user_interactions.filter(u => u.conversation_count > 0).length === 0) && (
+                                        <tr><td colSpan="4" style={{ textAlign: 'center', padding: '40px' }}>No conversation data available.</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                );
+            case 'access':
+                return (
+                    <div className="access-view">
+                        {actionMsg.type === 'success' && activeTab === 'access' && (
+                            <div className="success-banner">{actionMsg.text}</div>
+                        )}
+                        <div className="admin-glass-card" style={{ maxWidth: '600px' }}>
+                            <h2 className="form-title">Assign Neural Access</h2>
+                            <div className="form-field">
+                                <label className="form-label">TARGET USER EMAIL</label>
+                                <input
+                                    className="form-input" type="email" placeholder="user@justlearn.in"
+                                    value={userForm.email} onChange={e => setUserForm({ ...userForm, email: e.target.value })}
+                                />
+                            </div>
+                            <div className="form-field">
+                                <label className="form-label">TEMPORARY SECURITY PASS</label>
+                                <input
+                                    className="form-input" type="password" placeholder="••••••••"
+                                    value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })}
+                                />
+                            </div>
+                            <button
+                                className="submit-btn" disabled={actionLoading === 'user'}
+                                onClick={() => handleAction('user')}
+                            >
+                                {actionLoading === 'user' ? 'SYNCHRONIZING...' : 'GRANT ACCESS'}
+                            </button>
+                            {actionMsg.type === 'error' && <p className="msg-text error">{actionMsg.text}</p>}
+                        </div>
+                    </div>
+                );
+            case 'elevate':
+                return (
+                    <div className="elevate-view">
+                        {actionMsg.type === 'success' && activeTab === 'elevate' && (
+                            <div className="success-banner">{actionMsg.text}</div>
+                        )}
+                        <div className="admin-glass-card" style={{ maxWidth: '600px' }}>
+                            <h2 className="form-title">Elevate Authority Level</h2>
+                            <div className="form-field">
+                                <label className="form-label">ADMINISTRATOR NAME</label>
+                                <input
+                                    className="form-input" type="text" placeholder="Full Name"
+                                    onChange={e => setAdminForm({ ...adminForm, name: e.target.value })}
+                                />
+                            </div>
+                            <div className="form-field">
+                                <label className="form-label">SECURE EMAIL</label>
+                                <input
+                                    className="form-input" type="email" placeholder="admin@justlearnindia.in"
+                                    value={adminForm.email} onChange={e => setAdminForm({ ...adminForm, email: e.target.value })}
+                                />
+                            </div>
+                            <div className="form-field">
+                                <label className="form-label">ENCRYPTED PASSCODE</label>
+                                <input
+                                    className="form-input" type="password" placeholder="••••••••"
+                                    value={adminForm.password} onChange={e => setAdminForm({ ...adminForm, password: e.target.value })}
+                                />
+                            </div>
+                            <button
+                                className="submit-btn" disabled={actionLoading === 'admin'}
+                                onClick={() => handleAction('admin')}
+                            >
+                                {actionLoading === 'admin' ? 'INITIALIZING...' : 'ELEVATE PRIVILEGES'}
+                            </button>
+                            {actionMsg.type === 'error' && <p className="msg-text error">{actionMsg.text}</p>}
+                        </div>
+                    </div>
+                );
+            case 'registry':
+                return (
+                    <div className="registry-view">
+                        <div className="registry-container">
+                            <table className="registry-table">
+                                <thead>
+                                    <tr>
+                                        <th>NODE NAME</th>
+                                        <th>IDENTIFIER</th>
+                                        <th>RANK</th>
+                                        <th>STATUS</th>
+                                        <th>LAST ACTIVE</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {metrics?.user_interactions?.map((node) => (
+                                        <tr key={node.user_id} className="registry-row" onClick={() => {
+                                            setExpandedUser(node.user_id);
+                                            setActiveTab('history');
+                                        }}>
+                                            <td className="admin-name">{node.user_name}</td>
+                                            <td>{node.user_email}</td>
+                                            <td>
+                                                <span className={`role-badge role-${node.role}`}>{node.role}</span>
+                                            </td>
+                                            <td>
+                                                <span className={`access-dot ${node.has_chat_access ? 'access-on' : 'access-off'}`}></span>
+                                                {node.has_chat_access ? 'ONLINE' : 'LOCKED'}
+                                            </td>
+                                            <td>{node.last_active === 'Never' ? 'Never' : new Date(node.last_active).toLocaleDateString()}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                );
+            default:
+                return null;
+        }
+    };
 
     return (
         <div className="admin-dashboard">
-            <div className="dashboard-header">
-                <h1>Admin Dashboard</h1>
-                <p>Welcome back, {user?.name.split(' ')[0]}! Here are the system analytics.</p>
-            </div>
+            <aside className="admin-sidebar">
+                <div className="sidebar-brand">KRISHNA COMMAND</div>
+                <nav className="sidebar-menu">
+                    <div className={`menu-item ${activeTab === 'stats' ? 'active' : ''}`} onClick={() => setActiveTab('stats')}>
+                        <Icons.Stats /> <span>System Stats</span>
+                    </div>
+                    <div className={`menu-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
+                        <Icons.History /> <span>Neural history</span>
+                    </div>
+                    <div className={`menu-item ${activeTab === 'access' ? 'active' : ''}`} onClick={() => setActiveTab('access')}>
+                        <Icons.Shield /> <span>Access control</span>
+                    </div>
+                    <div className={`menu-item ${activeTab === 'elevate' ? 'active' : ''}`} onClick={() => setActiveTab('elevate')}>
+                        <Icons.Alert /> <span>Elevate admin</span>
+                    </div>
+                    <div className={`menu-item ${activeTab === 'registry' ? 'active' : ''}`} onClick={() => setActiveTab('registry')}>
+                        <Icons.Users /> <span>Node Registry</span>
+                    </div>
+                </nav>
+            </aside>
 
-            <div className="dashboard-metrics">
-                <div className="metric-card glass">
-                    <h3>Total Registered Users</h3>
-                    <div className="metric-value">{metrics?.total_users || 0}</div>
+            <main className="admin-main">
+                <nav className="admin-top-nav">
+                    <h1 className="section-title">
+                        {activeTab === 'stats' && 'System Diagnostics'}
+                        {activeTab === 'history' && 'Neural Memory Logs'}
+                        {activeTab === 'access' && 'Access Control'}
+                        {activeTab === 'elevate' && 'Create Admin'}
+                        {activeTab === 'registry' && 'Node Registry'}
+                    </h1>
+                    <div className="admin-profile-badge">
+                        <span className="ops-badge">ADMIN_OPS</span>
+                        <span className="admin-name">Admin {user?.name}</span>
+                    </div>
+                </nav>
+
+                <div className="content-area">
+                    {renderContent()}
                 </div>
-                <div className="metric-card glass">
-                    <h3>Total Conversations</h3>
-                    <div className="metric-value">{metrics?.total_conversations || 0}</div>
-                </div>
-            </div>
+            </main>
 
-            <div className="dashboard-logs">
-                <h2>User Interactions</h2>
-                <div className="users-list">
-                    {metrics?.user_interactions?.map((interaction) => (
-                        <div key={interaction.user_id} className={`user-accordion ${expandedUser === interaction.user_id ? 'expanded' : ''}`}>
-                            <div className="user-header" onClick={() => toggleUserExpand(interaction.user_id)}>
-                                <div className="user-info">
-                                    <span className="user-name">{interaction.user_name}</span>
-                                    <span className="user-email">{interaction.user_email}</span>
-                                </div>
-                                <div className="user-stats">
-                                    <span className="conv-count">{interaction.conversation_count} conversations</span>
-                                    <span className="last-active">Last active: {new Date(interaction.last_active).toLocaleDateString()}</span>
-                                    <span className="expand-icon">{expandedUser === interaction.user_id ? '▼' : '▶'}</span>
-                                </div>
-                            </div>
-
-                            {expandedUser === interaction.user_id && (
-                                <div className="user-conversations">
-                                    <div className="logs-table-container">
-                                        <table className="logs-table">
-                                            <thead>
-                                                <tr>
-                                                    <th>S.No</th>
-                                                    <th>Timestamp</th>
-                                                    <th>User Asked</th>
-                                                    <th>Model</th>
-                                                    <th>AI Response Snippet</th>
-                                                    <th>Action</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                {interaction.conversations.map((conv, idx) => (
-                                                    <tr key={conv.id}>
-                                                        <td className="serial-cell" data-label="S.No">{idx + 1}</td>
-                                                        <td className="time-cell" data-label="Time">{new Date(conv.timestamp).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</td>
-                                                        <td className="question-cell" data-label="Question" title={conv.question}>{conv.question}</td>
-                                                        <td className="model-cell" data-label="Model"><span className="model-badge">{conv.model_used}</span></td>
-                                                        <td className="answer-cell" data-label="Snippet" title={conv.answer}>{conv.answer}</td>
-                                                        <td className="action-cell" data-label="Option">
-                                                            <button
-                                                                className="view-btn"
-                                                                onClick={() => setSelectedInteraction(conv)}
-                                                            >
-                                                                View Full Chat
-                                                            </button>
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    ))}
-
-                    {!metrics?.user_interactions?.length && (
-                        <p style={{ textAlign: 'center', padding: '20px' }}>No user interactions recorded yet.</p>
-                    )}
-                </div>
-            </div>
-            {/* Full Conversation Modal */}
             {selectedInteraction && (
                 <div className="modal-overlay" onClick={() => setSelectedInteraction(null)}>
                     <div className="admin-modal" onClick={(e) => e.stopPropagation()}>
                         <div className="modal-header">
-                            <h3>Conversation Detail</h3>
+                            <h3>NEURAL INTERACTION AUDIT</h3>
                             <button className="close-btn" onClick={() => setSelectedInteraction(null)}>×</button>
                         </div>
                         <div className="modal-body">
                             <div className="admin-q-block">
-                                <h4>User Question</h4>
+                                <h4>INGESTED PROMPT</h4>
                                 <p>{selectedInteraction.question}</p>
                             </div>
                             <div className="admin-a-block">
-                                <h4>Krishna AI Response ({selectedInteraction.model_used})</h4>
+                                <h4>AI SYNTHESIS RESPONSE</h4>
                                 <p>{selectedInteraction.answer}</p>
+                            </div>
+                            <div className="admin-meta">
+                                <span>TIMESTAMP: {new Date(selectedInteraction.timestamp).toLocaleString()}</span>
+                                <span>ORIGIN: {selectedInteraction.user_email || 'SECURE_NODE'}</span>
                             </div>
                         </div>
                     </div>

@@ -734,10 +734,30 @@ def init_db():
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
                 email TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL
+                password TEXT NOT NULL,
+                role TEXT DEFAULT 'user',
+                has_chat_access BOOLEAN DEFAULT TRUE
             )
         ''')
         
+        # Add role column if missing in Postgres
+        try:
+            c.execute('SELECT role FROM users LIMIT 1')
+        except Exception:
+            conn.rollback()
+            print("Migrating Postgres DB: Adding role column...")
+            c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+            conn.commit()
+
+        # Add has_chat_access column if missing in Postgres
+        try:
+            c.execute('SELECT has_chat_access FROM users LIMIT 1')
+        except Exception:
+            conn.rollback()
+            print("Migrating Postgres DB: Adding chat access column...")
+            c.execute("ALTER TABLE users ADD COLUMN has_chat_access BOOLEAN DEFAULT TRUE")
+            conn.commit()
+            
         c.execute('''
             CREATE TABLE IF NOT EXISTS conversations (
                 id SERIAL PRIMARY KEY,
@@ -782,9 +802,26 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 email TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL
+                password TEXT NOT NULL,
+                role TEXT DEFAULT 'user',
+                has_chat_access BOOLEAN DEFAULT 1
             )
         ''')
+        conn.commit()
+
+        # Check for role column in SQLite
+        c.execute("PRAGMA table_info(users)")
+        cols = [col[1] for col in c.fetchall()]
+        if 'role' not in cols:
+            print("Migrating SQLite DB: Adding role column...")
+            c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+            conn.commit()
+
+        # Check for chat access column in SQLite
+        if 'has_chat_access' not in cols:
+            print("Migrating SQLite DB: Adding chat access column...")
+            c.execute("ALTER TABLE users ADD COLUMN has_chat_access BOOLEAN DEFAULT 1")
+            conn.commit()
         
         c.execute('''
             CREATE TABLE IF NOT EXISTS conversations (
@@ -797,12 +834,14 @@ def init_db():
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        conn.commit()
         
-        try:
-            c.execute('SELECT session_id FROM conversations LIMIT 1')
-        except sqlite3.OperationalError:
+        c.execute("PRAGMA table_info(conversations)")
+        conv_cols = [col[1] for col in c.fetchall()]
+        if 'session_id' not in conv_cols:
             print("Migrating SQLite DB: Adding session_id column...")
-            c.execute('ALTER TABLE conversations ADD COLUMN session_id TEXT')
+            c.execute("ALTER TABLE conversations ADD COLUMN session_id TEXT")
+            conn.commit()
             
         c.execute('''
             CREATE TABLE IF NOT EXISTS reset_tokens (
@@ -925,11 +964,14 @@ def seed_admin_user():
     hashed_pw = generate_password_hash(default_password)
     
     try:
-        user = execute_db('SELECT id FROM users WHERE email = ?', (admin_email,), fetchone=True)
+        user = execute_db('SELECT id, role FROM users WHERE email = ?', (admin_email,), fetchone=True)
         if not user:
-            execute_db('INSERT INTO users (name, email, password) VALUES (?, ?, ?)', 
-                       ('Abhishek Admin', admin_email, hashed_pw), commit=True)
+            execute_db('INSERT INTO users (name, email, password, role, has_chat_access) VALUES (?, ?, ?, ?, ?)', 
+                       ('Abhishek Admin', admin_email, hashed_pw, 'admin', True), commit=True)
             print(f"✅ Admin user seeded: {admin_email} / {default_password}")
+        elif user[1] != 'admin':
+            execute_db("UPDATE users SET role = 'admin', has_chat_access = TRUE WHERE email = ?", (admin_email,), commit=True)
+            print(f"✅ User {admin_email} promoted to admin")
     except Exception as e:
         print(f"Admin seeding error: {e}")
 
@@ -939,24 +981,46 @@ seed_admin_user()
 @app.route('/api/admin/metrics', methods=['GET'])
 def get_admin_metrics():
     user_id = request.args.get('user_id')
+    print(f"Admin Metrics Request from user_id: {user_id}")
     
     try:
-        # Verify user is the admin
-        user = execute_db('SELECT email FROM users WHERE id = ?', (user_id,), fetchone=True)
-        if not user or user[0] != 'abhishek@justlearnindia.in':
-            return jsonify({'error': 'Unauthorized', 'success': False}), 403
+        # Verify user is an admin
+        user = execute_db('SELECT email, role FROM users WHERE id = ?', (user_id,), fetchone=True)
+        if not user:
+            print(f"Unauthorized: No user found for id {user_id}")
+            return jsonify({'error': 'Unauthorized: User not found', 'success': False}), 403
+            
+        if user[1] != 'admin':
+            print(f"Unauthorized: User {user[0]} is not an admin (role: {user[1]})")
+            return jsonify({'error': 'Unauthorized: Admin role required', 'success': False}), 403
+            
+        print(f"Authorized: Metrics request from admin {user[0]}")
             
         # Total users
         total_users_row = execute_db('SELECT COUNT(*) FROM users', fetchone=True)
         total_users = total_users_row[0] if total_users_row else 0
         
+        # Today's users (DAU)
+        from datetime import datetime, timedelta
+        # Get start of today in IST
+        now = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start_str = today_start.strftime('%Y-%m-%d %H:%M:%S')
+        
+        dau_row = execute_db('''
+            SELECT COUNT(DISTINCT user_id) 
+            FROM conversations 
+            WHERE timestamp >= ?
+        ''', (today_start_str,), fetchone=True)
+        today_users = dau_row[0] if dau_row else 0
+        
         # Total conversations
         total_conv_row = execute_db('SELECT COUNT(*) FROM conversations', fetchone=True)
         total_conv = total_conv_row[0] if total_conv_row else 0
         
-        # Group conversations by user
+        # Group conversations by user, also include their status
         all_convs = execute_db('''
-            SELECT c.id, u.id, u.name, u.email, c.question, c.answer, c.timestamp 
+            SELECT c.id, u.id, u.name, u.email, c.question, c.answer, c.timestamp, u.role, u.has_chat_access
             FROM conversations c
             JOIN users u ON c.user_id = u.id
             ORDER BY c.timestamp DESC
@@ -970,6 +1034,8 @@ def get_admin_metrics():
                     'user_id': uid,
                     'user_name': conv[2],
                     'user_email': conv[3],
+                    'role': conv[7],
+                    'has_chat_access': bool(conv[8]),
                     'conversation_count': 0,
                     'last_active': None,
                     'conversations': []
@@ -978,6 +1044,8 @@ def get_admin_metrics():
             ts = conv[6]
             if hasattr(ts, 'isoformat'):
                 ts = ts.isoformat()
+            elif isinstance(ts, str):
+                pass # Already a string
                 
             if user_grouped[uid]['last_active'] is None:
                 user_grouped[uid]['last_active'] = ts
@@ -991,18 +1059,122 @@ def get_admin_metrics():
             })
             user_grouped[uid]['conversation_count'] += 1
             
+        # Fetch users who haven't started any conversation yet
+        inactive_users = execute_db('''
+            SELECT id, name, email, role, has_chat_access 
+            FROM users 
+            WHERE id NOT IN (SELECT DISTINCT user_id FROM conversations)
+        ''', fetchall=True)
+        
+        for u in inactive_users:
+            user_grouped[u[0]] = {
+                'user_id': u[0],
+                'user_name': u[1],
+                'user_email': u[2],
+                'role': u[3],
+                'has_chat_access': bool(u[4]),
+                'conversation_count': 0,
+                'last_active': 'Never',
+                'conversations': []
+            }
+            
         users_list = list(user_grouped.values())
+        # Sort users: Admins first, then by last active
+        users_list.sort(key=lambda x: (0 if x['role'] == 'admin' else 1, x['last_active'] if x['last_active'] != 'Never' else '0' ), reverse=True)
             
         return jsonify({
             'success': True, 
             'metrics': {
                 'total_users': total_users,
+                'today_users': today_users,
                 'total_conversations': total_conv,
                 'user_interactions': users_list
             }
         })
     except Exception as e:
-        print(f"Error fetching admin metrics: {e}")
+        print(f"❌ Error fetching admin metrics: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'error': f'Backend error: {str(e)}', 
+            'success': False,
+            'traceback': traceback.format_exc() if app.debug else None
+        }), 500
+
+@app.route('/api/admin/create-admin', methods=['POST'])
+def create_new_admin():
+    data = request.get_json()
+    admin_id = data.get('admin_id') # Current admin doing the operation
+    new_email = data.get('email', '').strip()
+    temp_password = data.get('password', '')
+    
+    try:
+        # Verify requester is an admin
+        requester = execute_db('SELECT role FROM users WHERE id = ?', (admin_id,), fetchone=True)
+        if not requester or requester[0] != 'admin':
+            return jsonify({'error': 'Unauthorized', 'success': False}), 403
+            
+        if not new_email or not temp_password:
+            return jsonify({'error': 'Email and temporary password are required', 'success': False}), 400
+            
+        hashed_pw = generate_password_hash(temp_password)
+        
+        # Check if user already exists
+        user = execute_db('SELECT id FROM users WHERE email = ?', (new_email,), fetchone=True)
+        if user:
+            # Promote existing user to admin
+            execute_db("UPDATE users SET role = 'admin', password = ? WHERE id = ?", (hashed_pw, user[0]), commit=True)
+            return jsonify({'success': True, 'message': f'User {new_email} promoted to admin with new password'})
+        else:
+            # Create new admin user
+            execute_db('INSERT INTO users (name, email, password, role, has_chat_access) VALUES (?, ?, ?, ?, ?)', 
+                       (new_email.split('@')[0], new_email, hashed_pw, 'admin', True), commit=True)
+            return jsonify({'success': True, 'message': f'New admin {new_email} created successfully'})
+            
+    except Exception as e:
+        print(f"Error creating admin: {e}")
+        return jsonify({'error': str(e), 'success': False}), 500
+
+@app.route('/api/admin/grant-access', methods=['POST'])
+def grant_chat_access():
+    data = request.get_json()
+    admin_id = data.get('admin_id')
+    user_email = data.get('email', '').strip()
+    has_access = data.get('access', True)
+    temp_password = data.get('password', '') # Optional: set new password
+    
+    try:
+        # Verify requester is an admin
+        requester = execute_db('SELECT role FROM users WHERE id = ?', (admin_id,), fetchone=True)
+        if not requester or requester[0] != 'admin':
+            return jsonify({'error': 'Unauthorized', 'success': False}), 403
+            
+        if not user_email:
+            return jsonify({'error': 'User email is required', 'success': False}), 400
+            
+        # Check if user exists
+        user = execute_db('SELECT id FROM users WHERE email = ?', (user_email,), fetchone=True)
+        if user:
+            if temp_password:
+                hashed_pw = generate_password_hash(temp_password)
+                execute_db("UPDATE users SET has_chat_access = ?, password = ? WHERE id = ?", (has_access, hashed_pw, user[0]), commit=True)
+            else:
+                execute_db("UPDATE users SET has_chat_access = ? WHERE id = ?", (has_access, user[0]), commit=True)
+            
+            status = "granted" if has_access else "revoked"
+            return jsonify({'success': True, 'message': f'Chat access {status} for {user_email}'})
+        else:
+            # Create new user with access
+            if not temp_password:
+                return jsonify({'error': 'Temporary password is required for new users', 'success': False}), 400
+                
+            hashed_pw = generate_password_hash(temp_password)
+            execute_db('INSERT INTO users (name, email, password, role, has_chat_access) VALUES (?, ?, ?, ?, ?)', 
+                       (user_email.split('@')[0], user_email, hashed_pw, 'user', has_access), commit=True)
+            return jsonify({'success': True, 'message': f'New user {user_email} created with chat access'})
+            
+    except Exception as e:
+        print(f"Error granting access: {e}")
         return jsonify({'error': str(e), 'success': False}), 500
 
 @app.route('/api/history', methods=['GET'])
@@ -1119,7 +1291,7 @@ def login():
         return jsonify({'error': 'Invalid email format', 'success': False}), 400
 
     try:
-        user = execute_db('SELECT id, name, email, password FROM users WHERE email = ?', (email,), fetchone=True)
+        user = execute_db('SELECT id, name, email, password, role, has_chat_access FROM users WHERE email = ?', (email,), fetchone=True)
 
         if user and check_password_hash(user[3], password):
             print(f"Successful login: {email}")
@@ -1129,7 +1301,9 @@ def login():
                 'user': {
                     'id': user[0],
                     'name': user[1],
-                    'email': user[2]
+                    'email': user[2],
+                    'role': user[4],
+                    'has_chat_access': bool(user[5])
                 }
             }), 200
         else:
