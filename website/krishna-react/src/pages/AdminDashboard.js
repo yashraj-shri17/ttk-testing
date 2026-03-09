@@ -351,6 +351,7 @@ function AdminDashboard() {
                 </nav>
 
                 <div className="content-area">
+                    {error && <div className="msg-text error" style={{ marginBottom: '25px', padding: '15px', background: 'rgba(255, 51, 102, 0.1)', borderRadius: '12px', border: '1px solid var(--admin-border)' }}>{error}</div>}
                     {renderContent()}
                 </div>
             </main>
