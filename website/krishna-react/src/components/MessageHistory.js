@@ -18,12 +18,6 @@ function MessageHistory({ messages, isOpen, onClose, onClearHistory, onSpeak, ac
 
         const isCitation = (l) => {
             const clean = l.toLowerCase().replace(/\s+/g, ' ');
-            // Check for traditional Hindi markers
-            const hiCitation = l.includes('भगवद') ||
-                l.includes('गीता') ||
-                l.includes('अध्याय') ||
-                l.includes('श्लोक');
-
             // At least two keywords must match for safety if it's broad
             const hasHiKeywords = (l.includes('अध्याय') && l.includes('श्लोक')) ||
                 (l.includes('गीता') && (l.includes('अध्याय') || l.includes('श्लोक')));
