@@ -210,6 +210,11 @@ class EmbeddingGenerator:
         This orchestrates the entire embedding generation process.
         """
         try:
+            # OPTIMIZATION: Skip if file already exists (especially on persistent storage)
+            if self.output_file.exists():
+                logger.info(f"Embeddings file already exists at {self.output_file}. Skipping generation.")
+                return
+
             # Load data
             data = self.load_data()
             
