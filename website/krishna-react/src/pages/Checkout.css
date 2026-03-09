@@ -12,6 +12,12 @@
     padding: 2rem;
 }
 
+@media (max-width: 768px) {
+    .checkout-container {
+        padding: 1.5rem 1rem;
+    }
+}
+
 .checkout-header {
     text-align: center;
     margin-bottom: 3rem;
@@ -27,9 +33,21 @@
     -webkit-text-fill-color: transparent;
 }
 
+@media (max-width: 768px) {
+    .checkout-header h2 {
+        font-size: 1.8rem;
+    }
+}
+
 .checkout-header p {
     color: rgba(255, 255, 255, 0.7);
     font-size: 1.1rem;
+}
+
+@media (max-width: 768px) {
+    .checkout-header p {
+        font-size: 0.95rem;
+    }
 }
 
 .checkout-content {
@@ -102,6 +120,20 @@
     font-weight: 500;
 }
 
+@media (max-width: 480px) {
+    .method-name {
+        font-size: 0.9rem;
+    }
+
+    .payment-method-card {
+        padding: 1rem;
+    }
+
+    .payment-method-card input[type="radio"] {
+        margin-right: 0.75rem;
+    }
+}
+
 /* Payment Details UI (Simulated) */
 .payment-details-form {
     background: rgba(var(--surface-color-rgb, 30, 30, 35), 0.4);
@@ -160,6 +192,16 @@
     border-radius: 16px;
     padding: 2rem;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+}
+
+@media (max-width: 768px) {
+    .summary-card {
+        padding: 1.5rem;
+    }
+
+    .summary-item.total {
+        font-size: 1.25rem;
+    }
 }
 
 .summary-item {
