@@ -248,25 +248,26 @@ def _generate_audio_async(text: str) -> str:
             async def _gen_all():
                 """Generate all parts and concatenate audio bytes."""
                 parts = []
-                rate = "+12%"
+                # Slower rate for English (Krishna's wisdom should be calm/slow)
+                # Normal/Fast for Hindi is okay, but English needs to be meditative.
+                eng_rate = "-10%" 
+                hi_rate = "+5%" # Slightly slower for clarity than original +12%
 
                 if before_text:
-                    parts.append(await _gen_part(before_text, main_voice, rate))
+                    parts.append(await _gen_part(before_text, main_voice, eng_rate if is_english else hi_rate))
 
                 if header_text:
-                    # Recommendation: Shloka citation ("Chapter X, Shloka Y") in main voice
-                    parts.append(await _gen_part(header_text, main_voice, rate))
+                    parts.append(await _gen_part(header_text, main_voice, eng_rate if is_english else hi_rate))
 
                 if verse_text:
-                    # Sanskrit verse always in Hindi voice
-                    parts.append(await _gen_part(verse_text, shloka_voice, rate))
+                    # Sanskrit verse always feels better at a calm pace
+                    parts.append(await _gen_part(verse_text, shloka_voice, "+0%"))
 
                 if after_text:
-                    parts.append(await _gen_part(after_text, main_voice, rate))
+                    parts.append(await _gen_part(after_text, main_voice, eng_rate if is_english else hi_rate))
 
                 if not parts and cleaned:
-                    # Fallback: whole cleaned text
-                    parts.append(await _gen_part(cleaned, main_voice, rate))
+                    parts.append(await _gen_part(cleaned, main_voice, eng_rate if is_english else hi_rate))
 
                 return b''.join([p for p in parts if p])
 
@@ -551,17 +552,19 @@ def speak_text():
 
         async def _gen_all():
             parts = []
-            rate = "+12%"
+            eng_rate = "-10%"
+            hi_rate = "+5%"
+            
             if before_text:
-                parts.append(await _gen_part(before_text, main_voice, rate))
+                parts.append(await _gen_part(before_text, main_voice, eng_rate if is_english else hi_rate))
             if header_text:
-                parts.append(await _gen_part(header_text, main_voice, rate))
+                parts.append(await _gen_part(header_text, main_voice, eng_rate if is_english else hi_rate))
             if verse_text:
-                parts.append(await _gen_part(verse_text, shloka_voice, rate))
+                parts.append(await _gen_part(verse_text, shloka_voice, "+0%"))
             if after_text:
-                parts.append(await _gen_part(after_text, main_voice, rate))
+                parts.append(await _gen_part(after_text, main_voice, eng_rate if is_english else hi_rate))
             if not parts and cleaned:
-                parts.append(await _gen_part(cleaned, main_voice, rate))
+                parts.append(await _gen_part(cleaned, main_voice, eng_rate if is_english else hi_rate))
             return b''.join([p for p in parts if p])
 
         # Run generation
