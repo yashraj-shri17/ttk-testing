@@ -85,18 +85,28 @@ def _split_text_for_tts(text: str):
 
     lines = text.split('\n')
 
-    citation_pattern_hi = re.compile(r'भगवद\s*गीता.*?अध्याय.*?श्लोक', re.UNICODE)
-    citation_pattern_en = re.compile(r'Bhagavad\s*Gita.*?Chapter.*?Shloka', re.IGNORECASE)
+    # Patterns to catch the citation line (handles variations in punctuation/spacing)
+    # Very robust citation patterns
+    # Handles "Bhagavad Gita", "Gita", "Chapter", "Shloka", "Verse", "Ch.", "v.", etc.
+    citation_pattern_hi = re.compile(
+        r'(?:भगवद\s*गीता|भगवद्गीता|श्रीमद्भगवद्गीता|गीता).*?(?:अध्याय|अ\.)'
+        r'.*?(?:श्लोक|श्लो\.|श\.).*?[\d०-९]+', 
+        re.UNICODE | re.IGNORECASE
+    )
+    citation_pattern_en = re.compile(
+        r'(?:Bhagavad\s*Gita|Gita).*?(?:Chapter|Ch\.?).*?(?:Shloka|Verse|v\.?).*?\d+', 
+        re.IGNORECASE
+    )
     
-    # Sanskrit lines are identified by having | (pipe used as verse separator) or ॥
+    # Sanskrit lines usually have markers like | or ॥
     sanskrit_line_pattern = re.compile(r'[|॥।]', re.UNICODE)
 
     before_lines = []
-    header_lines = []   # Citation line
+    header_lines = []
     verse_lines = []
     after_lines = []
 
-    state = 'before'  # states: before → citation → verse → after
+    state = 'before'
     is_english = False
 
     for line in lines:
@@ -105,46 +115,73 @@ def _split_text_for_tts(text: str):
             if state == 'before': before_lines.append(line)
             elif state == 'citation': header_lines.append(line)
             elif state == 'verse':
-                # Only keep blank lines in verse if we already started collecting verse lines
                 if verse_lines: verse_lines.append(line)
             else: after_lines.append(line)
             continue
 
         if state == 'before':
-            if citation_pattern_hi.search(stripped) or citation_pattern_en.search(stripped):
-                header_lines.append(line)
-                state = 'citation'
-                if citation_pattern_en.search(stripped):
-                    is_english = True
+            cit_hi = citation_pattern_hi.search(stripped)
+            cit_en = citation_pattern_en.search(stripped)
+            
+            if cit_hi or cit_en:
+                if cit_en: is_english = True
+                match = cit_hi or cit_en
+                
+                # Check for same-line verse content
+                line_after = stripped[match.end():].strip()
+                # If there's Devanagari or markers after the citation
+                if line_after and (sanskrit_line_pattern.search(line_after) or 
+                    len([c for c in line_after if '\u0900' <= c <= '\u097F']) > 0):
+                    header_lines.append(stripped[:match.end()])
+                    verse_lines.append(line_after)
+                    state = 'verse'
+                else:
+                    header_lines.append(line)
+                    state = 'citation'
             else:
                 before_lines.append(line)
         
         elif state == 'citation':
-            # After citation, we expect the Sanskrit verse
-            if sanskrit_line_pattern.search(stripped) or (
-                len([c for c in stripped if '\u0900' <= c <= '\u097F']) > len(stripped) * 0.25
-            ):
+            # Is this another citation line or the start of the verse?
+            if citation_pattern_hi.search(stripped) or citation_pattern_en.search(stripped):
+                header_lines.append(line)
+            elif len([c for c in stripped if '\u0900' <= c <= '\u097F']) > 0:
                 verse_lines.append(line)
                 state = 'verse'
             else:
-                # If it's not a verse line, maybe it's another citation or the start of 'after'
-                if citation_pattern_hi.search(stripped) or citation_pattern_en.search(stripped):
-                    header_lines.append(line)
-                else:
-                    after_lines.append(line)
-                    state = 'after'
+                # No Devanagari found after citation — must be end of core message
+                after_lines.append(line)
+                state = 'after'
         
         elif state == 'verse':
-            # Check if line is still part of the verse
-            if sanskrit_line_pattern.search(stripped) or (
-                len([c for c in stripped if '\u0900' <= c <= '\u097F']) > len(stripped) * 0.25
-            ):
+            # Does this line look like a verse or the beginning of explanation?
+            has_marker = sanskrit_line_pattern.search(stripped) or '||' in stripped
+            dev_count = len([c for c in stripped if '\u0900' <= c <= '\u097F'])
+            # Stop if marker count is high or terminal marker found
+            
+            if has_marker:
                 verse_lines.append(line)
+                # If terminal marker found, assume end of verse
+                if '॥' in stripped or '||' in stripped:
+                    state = 'after'
+            elif dev_count > 0:
+                # In Hindi mode, explanations are also Devanagari.
+                # Verses are usually shorter segments or distinct from full sentences.
+                # Sanskrit verses rarely have "है", "का", "की", "को" which are Hindi common words.
+                hindi_particles = {'है', 'हैं', 'था', 'थी', 'थे', 'को', 'के', 'की', 'का', 'में', 'से', 'ने', 'या'}
+                words = set(stripped.split())
+                is_hindi_sent = any(p in words for p in hindi_particles)
+                
+                if is_hindi_sent or len(stripped) > 80:
+                    after_lines.append(line)
+                    state = 'after'
+                else:
+                    verse_lines.append(line)
             else:
                 after_lines.append(line)
                 state = 'after'
         
-        else:  # after
+        else: # after
             after_lines.append(line)
 
     before_text = '\n'.join(before_lines).strip()

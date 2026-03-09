@@ -17,26 +17,49 @@ function MessageHistory({ messages, isOpen, onClose, onClearHistory, onSpeak, ac
         };
 
         const isCitation = (l) => {
-            const hiCitation = l.includes('भगवद गीता') || (l.includes('अध्याय') && l.includes('श्लोक'));
-            const enCitation = l.toLowerCase().includes('bhagavad gita') || (l.toLowerCase().includes('chapter') && l.toLowerCase().includes('shloka'));
-            return hiCitation || enCitation;
+            const clean = l.toLowerCase().replace(/\s+/g, ' ');
+            // Check for traditional Hindi markers
+            const hiCitation = l.includes('भगवद') ||
+                l.includes('गीता') ||
+                l.includes('अध्याय') ||
+                l.includes('श्लोक');
+
+            // At least two keywords must match for safety if it's broad
+            const hasHiKeywords = (l.includes('अध्याय') && l.includes('श्लोक')) ||
+                (l.includes('गीता') && (l.includes('अध्याय') || l.includes('श्लोक')));
+
+            const enCitation = clean.includes('bhagavad gita') ||
+                (clean.includes('gita') && (clean.includes('chapter') || clean.includes('shloka') || clean.includes('verse'))) ||
+                (clean.includes('ch.') && clean.includes('v.')) ||
+                (clean.includes('chapter') && clean.includes('shloka'));
+
+            return hasHiKeywords || enCitation || l.includes('भगवद्गीता') || l.includes('श्रीमद्भगवद्गीता');
         };
 
         let citationIdx = rawLines.findIndex(isCitation);
         let shlokaEnd = citationIdx;
 
         if (citationIdx !== -1) {
-            let foundDoubleDanda = false;
+            // Iterate lines after citation to find the verse
             for (let i = citationIdx + 1; i < Math.min(citationIdx + 6, rawLines.length); i++) {
-                // Check for Sanskrit markers or Devanagari heavy line
-                const devanagariCount = (rawLines[i].match(/[\u0900-\u097F]/g) || []).length;
-                const isDevanagariHeavy = devanagariCount > rawLines[i].length * 0.4;
+                const line = rawLines[i];
+                // Terminal markers are the strongest indicator of the end of a verse
+                const hasTerminalMarker = line.includes('॥') || line.includes('||');
+                const hasVerseMarker = /[।॥|]/.test(line) || hasTerminalMarker;
 
-                if (rawLines[i].includes('॥') || rawLines[i].includes('||') || isDevanagariHeavy) {
+                const devanagariCount = (line.match(/[\u0900-\u097F]/g) || []).length;
+                const isSanskritLooking = devanagariCount > line.length * 0.6; // Sanskrit verses are dense Devanagari
+
+                // Common Hindi particles that indicate an explanation sentence, not a verse
+                const hindiParticles = ['है', 'हैं', 'था', 'थी', 'थे', 'को', 'के', 'की', 'का', 'में', 'से', 'ने', 'या'];
+                const words = line.split(/\s+/);
+                const isHindiSentence = hindiParticles.some(p => words.includes(p)) || line.length > 100;
+
+                if (hasVerseMarker || (isSanskritLooking && !isHindiSentence)) {
                     shlokaEnd = i;
-                    foundDoubleDanda = true;
-                } else if (foundDoubleDanda) {
-                    // Stop if we already found the shloka block and this line isn't part of it
+                    if (hasTerminalMarker) break;
+                } else {
+                    // This line doesn't look like a verse, so the verse must have ended
                     break;
                 }
             }

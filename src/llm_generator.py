@@ -121,6 +121,7 @@ STRICT OUTPUT FORMAT (Follow Exactly):
 
 ABSOLUTE RULES:
 - Write in Hindi (Devanagari). Be concise and direct.
+- ALWAYS end the Sanskrit verse with the traditional '॥' marker.
 - Total response must be under 200 words.
 - DO NOT include any emojis.
 """
@@ -134,7 +135,8 @@ STRICT OUTPUT FORMAT (Follow Exactly):
 
 ABSOLUTE RULES:
 - Write in English. Be concise and direct.
-- Theverse text MUST be in Devanagari script (Sanskrit).
+- The verse text MUST be in Devanagari script (Sanskrit).
+- ALWAYS end the Sanskrit verse with the traditional '॥' marker.
 - The citation header MUST be in English: "Bhagavad Gita, Chapter X, Shloka Y".
 - Total response must be under 200 words.
 - DO NOT include any emojis.
