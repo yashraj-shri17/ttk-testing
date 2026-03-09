@@ -10,7 +10,9 @@ const Icons = {
     History: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>,
     Shield: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>,
     Users: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>,
-    Alert: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>
+    Alert: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>,
+    Tag: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></svg>,
+    Home: () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
 };
 
 function AdminDashboard() {
@@ -26,6 +28,8 @@ function AdminDashboard() {
     // Form states
     const [adminForm, setAdminForm] = useState({ email: '', password: '' });
     const [userForm, setUserForm] = useState({ email: '', password: '', access: true });
+    const [couponForm, setCouponForm] = useState({ code: '', type: 'percent', discount: '' });
+    const [coupons, setCoupons] = useState([]);
     const [actionLoading, setActionLoading] = useState(null);
     const [actionMsg, setActionMsg] = useState({ type: '', text: '' });
 
@@ -48,6 +52,19 @@ function AdminDashboard() {
         }
     }, [user]);
 
+    const fetchCoupons = useCallback(async () => {
+        if (!user) return;
+        try {
+            const response = await fetch(`${API_ENDPOINTS.ADMIN_COUPONS}?user_id=${user.id}`);
+            const data = await response.json();
+            if (data.success) {
+                setCoupons(data.coupons);
+            }
+        } catch (err) {
+            console.error('Coupon fetch error:', err);
+        }
+    }, [user]);
+
     useEffect(() => {
         const isAdmin = user && (user.role === 'admin' || user.email === 'abhishek@justlearnindia.in');
         if (!isAdmin) {
@@ -55,7 +72,50 @@ function AdminDashboard() {
             return;
         }
         fetchMetrics();
-    }, [user, navigate, fetchMetrics]);
+        if (activeTab === 'coupons') fetchCoupons();
+    }, [user, navigate, fetchMetrics, fetchCoupons, activeTab]);
+
+    const handleCouponAction = async (action, id = null) => {
+        setActionLoading(action);
+        setActionMsg({ type: '', text: '' });
+
+        try {
+            if (action === 'create') {
+                const response = await fetch(`${API_ENDPOINTS.ADMIN_COUPONS}?user_id=${user.id}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: user.id,
+                        code: couponForm.code,
+                        discount_type: couponForm.type,
+                        discount_value: parseFloat(couponForm.discount)
+                    })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    setActionMsg({ type: 'success', text: 'COUPON_CREATED_SUCCESSFULLY.' });
+                    setCouponForm({ code: '', type: 'percent', discount: '' });
+                    fetchCoupons();
+                } else {
+                    setActionMsg({ type: 'error', text: data.error || 'Failed to create coupon' });
+                }
+            } else if (action === 'delete') {
+                const response = await fetch(`${API_ENDPOINTS.ADMIN_COUPONS}/${id}?user_id=${user.id}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: user.id })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    fetchCoupons();
+                }
+            }
+        } catch (err) {
+            setActionMsg({ type: 'error', text: 'SYNC_ERROR: NETWORK REQUEST FAILED.' });
+        } finally {
+            setActionLoading(null);
+        }
+    };
 
     const handleAction = async (type) => {
         setActionLoading(type);
@@ -307,6 +367,91 @@ function AdminDashboard() {
                         </div>
                     </div>
                 );
+            case 'coupons':
+                return (
+                    <div className="coupons-view">
+                        <div className="admin-grid">
+                            <div className="admin-glass-card">
+                                <h2 className="form-title">Create New Coupon</h2>
+                                <div className="form-field">
+                                    <label className="form-label">COUPON CODE</label>
+                                    <input
+                                        className="form-input" type="text" placeholder="KRISHNA20"
+                                        value={couponForm.code} onChange={e => setCouponForm({ ...couponForm, code: e.target.value.toUpperCase() })}
+                                    />
+                                </div>
+                                <div className="form-field">
+                                    <label className="form-label">DISCOUNT TYPE</label>
+                                    <select
+                                        className="form-input"
+                                        value={couponForm.type}
+                                        onChange={e => setCouponForm({ ...couponForm, type: e.target.value })}
+                                        style={{ background: 'var(--admin-input-bg)', color: 'white' }}
+                                    >
+                                        <option value="percent">Percentage (%)</option>
+                                        <option value="flat">Flat Amount (₹)</option>
+                                    </select>
+                                </div>
+                                <div className="form-field">
+                                    <label className="form-label">DISCOUNT VALUE</label>
+                                    <input
+                                        className="form-input" type="number" placeholder="Value (e.g. 10 or 50)"
+                                        value={couponForm.discount} onChange={e => setCouponForm({ ...couponForm, discount: e.target.value })}
+                                    />
+                                </div>
+                                <button
+                                    className="submit-btn" disabled={actionLoading === 'create'}
+                                    onClick={() => handleCouponAction('create')}
+                                >
+                                    {actionLoading === 'create' ? 'GENERATING...' : 'CREATE COUPON'}
+                                </button>
+                                {actionMsg.text && activeTab === 'coupons' && <p className={`msg-text ${actionMsg.type}`}>{actionMsg.text}</p>}
+                            </div>
+
+                            <div className="admin-glass-card">
+                                <h2 className="form-title">Active Neural Coupons</h2>
+                                <div className="registry-container" style={{ maxHeight: '400px' }}>
+                                    <table className="registry-table">
+                                        <thead>
+                                            <tr>
+                                                <th>CODE</th>
+                                                <th>TYPE</th>
+                                                <th>VALUE</th>
+                                                <th>STATUS</th>
+                                                <th>ACTION</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {coupons.map((c) => (
+                                                <tr key={c.id} className="registry-row">
+                                                    <td style={{ fontWeight: 'bold', color: 'var(--admin-primary)' }}>{c.code}</td>
+                                                    <td>{c.discount_type.toUpperCase()}</td>
+                                                    <td>{c.discount_type === 'percent' ? `${c.discount_value}%` : `₹${c.discount_value}`}</td>
+                                                    <td>
+                                                        <span className={`access-dot ${c.is_active ? 'access-on' : 'access-off'}`}></span>
+                                                        {c.is_active ? 'ACTIVE' : 'INACTIVE'}
+                                                    </td>
+                                                    <td>
+                                                        <button
+                                                            className="view-btn"
+                                                            style={{ color: 'var(--admin-error)', borderColor: 'rgba(255, 51, 102, 0.3)' }}
+                                                            onClick={() => handleCouponAction('delete', c.id)}
+                                                        >
+                                                            DELETE
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {coupons.length === 0 && (
+                                                <tr><td colSpan="5" style={{ textAlign: 'center', padding: '40px' }}>No coupons active in neural net.</td></tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
             default:
                 return null;
         }
@@ -332,6 +477,12 @@ function AdminDashboard() {
                     <div className={`menu-item ${activeTab === 'registry' ? 'active' : ''}`} onClick={() => setActiveTab('registry')}>
                         <Icons.Users /> <span>Node Registry</span>
                     </div>
+                    <div className={`menu-item ${activeTab === 'coupons' ? 'active' : ''}`} onClick={() => setActiveTab('coupons')}>
+                        <Icons.Tag /> <span>Coupons</span>
+                    </div>
+                    <div className="menu-item back-home" onClick={() => navigate('/')}>
+                        <Icons.Home /> <span>Back to Home</span>
+                    </div>
                 </nav>
             </aside>
 
@@ -343,6 +494,7 @@ function AdminDashboard() {
                         {activeTab === 'access' && 'Access Control'}
                         {activeTab === 'elevate' && 'Create Admin'}
                         {activeTab === 'registry' && 'Node Registry'}
+                        {activeTab === 'coupons' && 'Coupon Management'}
                     </h1>
                     <div className="admin-profile-badge">
                         <span className="ops-badge">ADMIN_OPS</span>

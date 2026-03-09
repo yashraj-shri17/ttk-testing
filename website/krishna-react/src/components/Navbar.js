@@ -52,6 +52,7 @@ function Navbar() {
                     <Link to="/" className={`nav-link ${location.pathname === '/' ? 'active' : ''}`} onClick={closeMenu}>Home</Link>
                     <Link to="/about" className={`nav-link ${location.pathname === '/about' ? 'active' : ''}`} onClick={closeMenu}>About</Link>
                     <Link to="/contact" className={`nav-link ${location.pathname === '/contact' ? 'active' : ''}`} onClick={closeMenu}>Contact</Link>
+                    <Link to="/pricing" className={`nav-link ${location.pathname === '/pricing' ? 'active' : ''}`} onClick={closeMenu}>Pricing</Link>
                     <Link to="/privacy" className={`nav-link ${location.pathname === '/privacy' ? 'active' : ''}`} onClick={closeMenu}>Privacy</Link>
 
                     {user ? (

@@ -76,32 +76,40 @@ def _split_text_for_tts(text: str):
       - parts_after_verse: text after the verse block
 
     The shloka block starts with a line like:
-      "भगवद गीता, अध्याय X, श्लोक Y"
+      "भगवद गीता, अध्याय X, श्लोक Y" OR "Bhagavad Gita, Chapter X, Shloka Y"
     followed by Sanskrit verse lines (containing | or ॥ or Devanagari + pipe characters).
 
-    Returns (before, verse, after) as strings. 'verse' may be empty if not found.
+    Returns (before, verse, after, lang_hint) as strings/bool.
     """
     import re
 
     lines = text.split('\n')
 
-    citation_pattern = re.compile(r'भगवद\s*गीता.*?अध्याय.*?श्लोक', re.UNICODE)
+    citation_pattern_hi = re.compile(r'भगवद\s*गीता.*?अध्याय.*?श्लोक', re.UNICODE)
+    citation_pattern_en = re.compile(r'Bhagavad\s*Gita.*?Chapter.*?Shloka', re.IGNORECASE)
+    
     # Sanskrit lines are identified by having | (pipe used as verse separator) or ॥
     sanskrit_line_pattern = re.compile(r'[|॥।]', re.UNICODE)
 
     before_lines = []
-    header_lines = []   # "भगवद गीता, अध्याय X, श्लोक Y"
+    header_lines = []   # Citation line
     verse_lines = []
     after_lines = []
 
     state = 'before'  # states: before → citation → verse → after
+    is_english = False
 
     for line in lines:
         stripped = line.strip()
         if state == 'before':
-            if citation_pattern.search(stripped):
+            if citation_pattern_hi.search(stripped):
                 header_lines.append(line)
                 state = 'citation'
+                is_english = False
+            elif citation_pattern_en.search(stripped):
+                header_lines.append(line)
+                state = 'citation'
+                is_english = True
             else:
                 before_lines.append(line)
         elif state == 'citation':
@@ -133,11 +141,20 @@ def _split_text_for_tts(text: str):
             after_lines.append(line)
 
     before_text = '\n'.join(before_lines).strip()
-    # Combine header + verse for the "slow" portion
-    verse_text = '\n'.join(header_lines + verse_lines).strip()
+    
+    # In English response case, we want to split the Header (English) from Verse (Sanskrit)
+    # to use different voices. So we return them separately or handle them in the caller.
+    header_text = '\n'.join(header_lines).strip()
+    verse_text = '\n'.join(verse_lines).strip()
     after_text = '\n'.join(after_lines).strip()
 
-    return before_text, verse_text, after_text
+    # Determine if the 'before' text is primarily English (to double check)
+    if not is_english and len(before_text) > 0:
+        english_chars = len(re.findall(r'[a-zA-Z]', before_text))
+        if english_chars > len(before_text) * 0.5:
+            is_english = True
+
+    return before_text, header_text, verse_text, after_text, is_english
 
 
 def _generate_audio_async(text: str) -> str:
@@ -166,12 +183,19 @@ def _generate_audio_async(text: str) -> str:
             cleaned = re.sub(r'<[^>]*>', '', cleaned).strip()
             print(f"Text length after cleaning: {len(cleaned)} characters")
 
-            # 2. Split into before-verse, verse (slow), after-verse parts
-            before_text, verse_text, after_text = _split_text_for_tts(cleaned)
+            # 2. Split into parts and language hint
+            before_text, header_text, verse_text, after_text, is_english = _split_text_for_tts(cleaned)
+            
+            # 3. Choose voices
+            # Krishna English voice: mature, calm
+            main_voice = "en-US-GuyNeural" if is_english else "hi-IN-MadhurNeural"
+            shloka_voice = "hi-IN-MadhurNeural" # Always Hindi pronunciation for Sanskrit
 
-            async def _gen_part(part_text: str, rate: str) -> bytes:
+            async def _gen_part(part_text: str, voice: str, rate: str) -> bytes:
+                if not part_text.strip():
+                    return b''
                 buf = io.BytesIO()
-                communicate = edge_tts.Communicate(part_text, "hi-IN-MadhurNeural", rate=rate, pitch="+0Hz")
+                communicate = edge_tts.Communicate(part_text, voice, rate=rate, pitch="+0Hz")
                 async for chunk in communicate.stream():
                     if chunk["type"] == "audio":
                         buf.write(chunk["data"])
@@ -180,22 +204,27 @@ def _generate_audio_async(text: str) -> str:
             async def _gen_all():
                 """Generate all parts and concatenate audio bytes."""
                 parts = []
+                rate = "+12%"
 
                 if before_text:
-                    parts.append(await _gen_part(before_text, "+12%"))
+                    parts.append(await _gen_part(before_text, main_voice, rate))
+
+                if header_text:
+                    # Recommendation: Shloka citation ("Chapter X, Shloka Y") in main voice
+                    parts.append(await _gen_part(header_text, main_voice, rate))
 
                 if verse_text:
-                    # Shloka is spoken at a natural, consistent pace
-                    parts.append(await _gen_part(verse_text, "+12%"))
+                    # Sanskrit verse always in Hindi voice
+                    parts.append(await _gen_part(verse_text, shloka_voice, rate))
 
                 if after_text:
-                    parts.append(await _gen_part(after_text, "+12%"))
+                    parts.append(await _gen_part(after_text, main_voice, rate))
 
-                if not parts:
-                    # Fallback: generate whole cleaned text at consistent rate
-                    parts.append(await _gen_part(cleaned, "+12%"))
+                if not parts and cleaned:
+                    # Fallback: whole cleaned text
+                    parts.append(await _gen_part(cleaned, main_voice, rate))
 
-                return b''.join(parts)
+                return b''.join([p for p in parts if p])
 
             # Run async generation
             tts_start = time.time()
@@ -301,20 +330,19 @@ def ask_question():
         # --- FAST GREETING CHECK (Backup) ---
         # This ensures we catch greetings at the API layer 
         # to guarantee instant response without DB lookup.
-        greetings_backup = {
-            # English greetings
+        english_greetings = {
             "hi", "hello", "hey", "hii", "hiii", "helo", "heyy", "heya", "yo",
             "greetings", "good morning", "good afternoon", "good evening", "good night",
             "gm", "ge", "gn", "ga", "morning", "evening", "afternoon",
-            
-            # Hindi/Sanskrit greetings (Romanized)
+            "sup", "wassup", "whatsup", "howdy", "hola"
+        }
+        
+        hindi_greetings = {
             "namaste", "namaskar", "namaskaram", "pranam", "pranaam", "pranaams",
             "radhe radhe", "radhey radhey", "radhe", "radhey",
             "jai shri krishna", "jai shree krishna", "jai sri krishna", 
             "hare krishna", "hare krsna", "krishna", "krsna",
             "jai", "jay", "om", "aum",
-            
-            # Hindi Devanagari Script Greetings
             "हेलो", "हेल्लो", "हाय", "हाई", "हलो",
             "नमस्ते", "नमस्कार", "नमस्कारम", "प्रणाम", "प्रनाम",
             "राधे राधे", "राधे", "राधेय राधेय",
@@ -323,41 +351,44 @@ def ask_question():
             "जय", "ओम", "ॐ",
             "सुप्रभात", "शुभ संध्या", "शुभ रात्रि",
             "कैसे हो", "कैसे हैं", "क्या हाल", "क्या हाल है",
-            
-            # Casual/Informal
-            "sup", "wassup", "whatsup", "howdy", "hola",
             "kaise ho", "kaise hain", "kya haal", "kya hal", "namaskaar"
         }
+        
+        greetings_backup = english_greetings.union(hindi_greetings)
         
         import unicodedata
         q_lower = "".join(c for c in question.lower() if c.isalnum() or c.isspace() or unicodedata.category(c).startswith('M'))
         q_words = q_lower.split()
         
         is_greeting = False
+        greeting_language = "hi"
+        
         if q_words:
-            # Check if entire query is a greeting phrase
             full_query = ' '.join(q_words)
             if full_query in greetings_backup:
                 is_greeting = True
+                if full_query in english_greetings:
+                    greeting_language = "en"
             
-            # Check for two-word greeting phrases
             elif len(q_words) >= 2:
                 two_word = f"{q_words[0]} {q_words[1]}"
                 if two_word in greetings_backup:
                     if len(q_words) <= 3:
                         is_greeting = True
+                        if two_word in english_greetings: greeting_language = "en"
                     else:
                         q_words_set = {'what', 'how', 'why', 'who', 'when', 'where', 
                                      'kya', 'kyun', 'kaise', 'kab', 'kahan', 'kaun',
                                      'explain', 'tell', 'batao', 'bataiye', 'btao'}
                         if not any(qw in q_words for qw in q_words_set):
                             is_greeting = True
+                            if two_word in english_greetings: greeting_language = "en"
             
-            # Case 1: Very short (just greeting)
             elif len(q_words) <= 3 and any(w in greetings_backup for w in q_words):
                 is_greeting = True
+                greeting_word = next(w for w in q_words if w in greetings_backup)
+                if greeting_word in english_greetings: greeting_language = "en"
                 
-            # Case 2: Greeting start, no question words
             elif len(q_words) <= 6 and q_words[0] in greetings_backup:
                 q_words_set = {'what', 'how', 'why', 'who', 'when', 'where', 
                              'kya', 'kyun', 'kaise', 'kab', 'kahan', 'kaun',
@@ -365,12 +396,15 @@ def ask_question():
                              'is', 'are', 'can', 'should', 'would', 'could'}
                 if not any(qw in q_words for qw in q_words_set):
                     is_greeting = True
-
-
+                    if q_words[0] in english_greetings: greeting_language = "en"
 
         if is_greeting:
-            print(f"Greeting detected in API: {question}")
-            greeting_text = "राधे राधे! मैं श्री कृष्ण हूँ। कहिये, मैं आपकी क्या सहायता कर सकता हूँ?"
+            print(f"Greeting detected in API: {question} [{greeting_language}]")
+            if greeting_language == "en":
+                greeting_text = "Radhe Radhe! I am Lord Krishna. Tell me, how can I help you today?"
+            else:
+                greeting_text = "राधे राधे! मैं श्री कृष्ण हूँ। कहिये, मैं आपकी क्या सहायता कर सकता हूँ?"
+                
             response = {
                 'success': True,
                 'answer': greeting_text,
@@ -378,11 +412,9 @@ def ask_question():
                 'llm_used': True 
             }
             
-            # Save greeting conversation if user is logged in
             if user_id:
                 save_conversation(user_id, question, greeting_text, [], session_id=session_id)
             
-            # Generate audio if requested
             if include_audio:
                 audio_id = _generate_audio_async(greeting_text)
                 response['audio_url'] = f'/api/audio/{audio_id}'
@@ -458,11 +490,16 @@ def speak_text():
         # 1. Clean and Split
         cleaned = _clean_text_for_tts(text)
         cleaned = re.sub(r'<[^>]*>', '', cleaned).strip()
-        before_text, verse_text, after_text = _split_text_for_tts(cleaned)
+        before_text, header_text, verse_text, after_text, is_english = _split_text_for_tts(cleaned)
 
-        async def _gen_part(part_text: str, rate: str) -> bytes:
+        main_voice = "en-US-GuyNeural" if is_english else "hi-IN-MadhurNeural"
+        shloka_voice = "hi-IN-MadhurNeural"
+
+        async def _gen_part(part_text: str, voice: str, rate: str) -> bytes:
+            if not part_text.strip():
+                return b''
             buf = io.BytesIO()
-            communicate = edge_tts.Communicate(part_text, "hi-IN-MadhurNeural", rate=rate, pitch="+0Hz")
+            communicate = edge_tts.Communicate(part_text, voice, rate=rate, pitch="+0Hz")
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
                     buf.write(chunk["data"])
@@ -470,15 +507,18 @@ def speak_text():
 
         async def _gen_all():
             parts = []
+            rate = "+12%"
             if before_text:
-                parts.append(await _gen_part(before_text, "+12%"))
+                parts.append(await _gen_part(before_text, main_voice, rate))
+            if header_text:
+                parts.append(await _gen_part(header_text, main_voice, rate))
             if verse_text:
-                parts.append(await _gen_part(verse_text, "+12%"))
+                parts.append(await _gen_part(verse_text, shloka_voice, rate))
             if after_text:
-                parts.append(await _gen_part(after_text, "+12%"))
-            if not parts:
-                parts.append(await _gen_part(cleaned, "+12%"))
-            return b''.join(parts)
+                parts.append(await _gen_part(after_text, main_voice, rate))
+            if not parts and cleaned:
+                parts.append(await _gen_part(cleaned, main_voice, rate))
+            return b''.join([p for p in parts if p])
 
         # Run generation
         audio_bytes = asyncio.run(_gen_all())
@@ -789,6 +829,17 @@ def init_db():
                 used BOOLEAN DEFAULT FALSE
             )
         ''')
+        
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS coupons (
+                id SERIAL PRIMARY KEY,
+                code TEXT UNIQUE NOT NULL,
+                discount_type TEXT NOT NULL,
+                discount_value NUMERIC NOT NULL,
+                active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         conn.commit()
         conn.close()
     else:
@@ -852,6 +903,17 @@ def init_db():
                 expires_at DATETIME NOT NULL,
                 used BOOLEAN DEFAULT 0
             )''')
+            
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS coupons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                code TEXT UNIQUE NOT NULL,
+                discount_type TEXT NOT NULL,
+                discount_value REAL NOT NULL,
+                active BOOLEAN DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
         conn.commit()
         conn.close()
 
@@ -977,6 +1039,22 @@ def seed_admin_user():
 
 # Seed the admin user
 seed_admin_user()
+
+from functools import wraps
+
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        json_data = request.get_json(silent=True) or {}
+        user_id = request.args.get('user_id') or json_data.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'User ID is required', 'success': False}), 400
+            
+        user = execute_db('SELECT role FROM users WHERE id = ?', (user_id,), fetchone=True)
+        if not user or user[0] != 'admin':
+            return jsonify({'error': 'Unauthorized: Admin access required', 'success': False}), 403
+        return f(*args, **kwargs)
+    return decorated_function
 
 @app.route('/api/admin/metrics', methods=['GET'])
 def get_admin_metrics():
@@ -1396,6 +1474,117 @@ def reset_password():
     except Exception as e:
         print(f"Reset password error: {e}")
         return jsonify({'error': 'Password reset failed. Please try again.', 'success': False}), 500
+
+# ==========================================
+# Coupon Management (Admin & Validation)
+# ==========================================
+
+@app.route('/api/admin/coupons', methods=['GET'])
+@admin_required
+def get_coupons():
+    try:
+        user_id = request.args.get('user_id')
+        coupons = execute_db('SELECT id, code, discount_type, discount_value, active, created_at FROM coupons ORDER BY created_at DESC', fetchall=True)
+        coupons_list = []
+        for c in coupons:
+            # Handle datetime objects for JSON serialization
+            created_at = c[5]
+            if created_at and hasattr(created_at, 'isoformat'):
+                created_at = created_at.isoformat()
+            elif created_at is not None:
+                created_at = str(created_at)
+                
+            coupons_list.append({
+                'id': c[0],
+                'code': c[1],
+                'discount_type': c[2],
+                'discount_value': float(c[3]),
+                'is_active': bool(c[4]), # Keep key name 'is_active' for frontend compatibility
+                'created_at': created_at
+            })
+            
+        return jsonify({
+            'success': True,
+            'coupons': coupons_list
+        }), 200
+    except Exception as e:
+        print(f"[ERROR] Fetch coupons failed: {e}")
+        return jsonify({'error': 'Failed to fetch coupons', 'success': False}), 500
+
+@app.route('/api/admin/coupons', methods=['POST'])
+@admin_required
+def create_coupon():
+    """Create a new coupon (admin only)"""
+    data = request.get_json()
+    code = data.get('code', '').strip().upper()
+    discount_type = data.get('discount_type')
+    discount_value = data.get('discount_value')
+    
+    if not code or not discount_type or discount_value is None:
+        return jsonify({'error': 'Code, type, and value are required', 'success': False}), 400
+        
+    if discount_type not in ['flat', 'percent']:
+        return jsonify({'error': 'Invalid discount type', 'success': False}), 400
+        
+    try:
+        execute_db(
+            'INSERT INTO coupons (code, discount_type, discount_value) VALUES (?, ?, ?)',
+            (code, discount_type, discount_value),
+            commit=True
+        )
+        return jsonify({
+            'success': True,
+            'message': f'Coupon {code} created successfully'
+        }), 201
+    except Exception as e:
+        error_str = str(e).upper()
+        if 'UNIQUE' in error_str or 'ALREADY EXISTS' in error_str:
+            return jsonify({'error': f'Coupon code "{code}" already exists', 'success': False}), 409
+            
+        print(f"Error creating coupon: {e}")
+        return jsonify({'error': 'Failed to create coupon due to system error', 'success': False}), 500
+
+@app.route('/api/admin/coupons/<int:coupon_id>', methods=['DELETE'])
+@admin_required
+def delete_coupon(coupon_id):
+    """Delete a coupon (admin only)"""
+    try:
+        execute_db('DELETE FROM coupons WHERE id = ?', (coupon_id,), commit=True)
+        return jsonify({'success': True, 'message': 'Coupon deleted successfully'}), 200
+    except Exception as e:
+        print(f"Error deleting coupon: {e}")
+        return jsonify({'error': 'Failed to delete coupon', 'success': False}), 500
+
+@app.route('/api/coupons/validate', methods=['POST'])
+def validate_coupon():
+    """Validate a coupon code"""
+    data = request.get_json()
+    code = data.get('code', '').strip().upper()
+    
+    if not code:
+        return jsonify({'error': 'Coupon code is required', 'success': False}), 400
+        
+    try:
+        # In Postgres, use a compatible boolean check for column 'active'
+        active_check = "TRUE" if USE_POSTGRES else "1"
+        query = f'SELECT discount_type, discount_value FROM coupons WHERE code = ? AND active = {active_check}'
+        
+        coupon = execute_db(query, (code,), fetchone=True)
+        
+        if not coupon:
+            return jsonify({'error': 'Invalid or inactive coupon code', 'success': False}), 404
+            
+        return jsonify({
+            'success': True,
+            'coupon': {
+                'code': code,
+                'type': coupon[0],
+                'discount': float(coupon[1])
+            }
+        }), 200
+    except Exception as e:
+        print(f"[ERROR] Validation failed: {e}")
+        return jsonify({'error': 'Failed to validate coupon', 'success': False}), 500
 
 if __name__ == '__main__':
     print("\n" + "="*70)

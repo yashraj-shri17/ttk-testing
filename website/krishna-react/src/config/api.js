@@ -24,6 +24,10 @@ export const API_ENDPOINTS = {
     ADMIN_METRICS: `${API_BASE_URL}/api/admin/metrics`,
     CREATE_ADMIN: `${API_BASE_URL}/api/admin/create-admin`,
     GRANT_ACCESS: `${API_BASE_URL}/api/admin/grant-access`,
+    ADMIN_COUPONS: `${API_BASE_URL}/api/admin/coupons`,
+
+    // Checkout
+    VALIDATE_COUPON: `${API_BASE_URL}/api/coupons/validate`,
 };
 
 export default API_BASE_URL;

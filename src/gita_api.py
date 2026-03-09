@@ -722,7 +722,7 @@ Example: ["2.47", "18.66"]"""
         
         return False
 
-    def _is_relevant_to_krishna(self, query: str) -> Tuple[bool, str]:
+    def _is_relevant_to_krishna(self, query: str, language: str = "hi") -> Tuple[bool, str]:
         """
         Check if the query is relevant to Krishna, Bhagavad Gita, or spiritual life guidance.
         Returns: (is_relevant: bool, rejection_message: str if not relevant)
@@ -781,12 +781,14 @@ Example: ["2.47", "18.66"]"""
                          'error', 'bug', 'fix', 'wifi', 'internet', 'mobile', 'phone', 'battery',
                          'charger', 'sim', 'network', '4g', '5g', 'bluetooth', 'mouse', 'keyboard',
                          'hack', 'password', 'login', 'signup', 'account', 'delete', 'router', 'processor',
-                         'ram', 'ssd', 'usb', 'c language', 'c++', 'update software', 'upgrade',
-                         'कंप्यूटर', 'लैपटॉप', 'मोबाइल', 'फ़ोन', 'चार्जर', 'इंटरनेट', 'वाईफाई',
-                         'ऐप', 'सॉफ्टवेयर', 'इंस्टॉल', 'डाउनलोड', 'हैकिंग', 'पासवर्ड', 'अकाउंट',
-                         'पायथन', 'जावा', 'कोडिंग', 'प्रोग्रामिंग', 'गिठूब', 'रेपो', 'नेटवर्क',
-                         'बैटरी', 'प्रोसेसर', 'कीबोर्ड', 'माउस',
-                         'javascript', 'js', 'html', 'css', 'react', 'node', 'frontend', 'backend'],
+                         'ram', 'ssd', 'usb', 'c langua', 'c++', 'javascript', 'html', 'css',
+                         'react', 'node', 'django', 'flask', 'api', 'json', 'xml', 'sql', 'mysql',
+                         'postgres', 'mongodb', 'docker', 'kubernetes', 'aws', 'azure', 'gcp',
+                         'cloud', 'linux', 'windows', 'mac', 'ubuntu', 'fedora', 'debian', 'centos',
+                         'redhat', 'kali', 'arch', 'mint', 'manjaro', 'popos', 'elem', 'ai', 'ml',
+                         'deep learning', 'machine learning', 'artificial intelligence', 'data science',
+                         'data analyst', 'data engineer', 'big data', 'hadoop', 'spark', 'kafka',
+                         'elasticsearch', 'logstash', 'kibana', 'grafana', 'prometheus', 'zabbix'],
             
             # Finance & Money
             'finance': ['stock market', 'share market', 'invest', 'investment', 'mutual fund',
@@ -933,7 +935,10 @@ Example: ["2.47", "18.66"]"""
                 # For Devanagari, we use a simple boundary check
                 if re.search(rf'\b{re.escape(nm_pat)}\b', norm_query) or nm_pat in norm_query.split():
                     logger.warning(f"❌ Irrelevant query detected ({category}): '{query}'")
-                    return False, f"""क्षमा करें, मैं श्री कृष्ण हूँ और केवल जीवन की समस्याओं, आध्यात्मिकता, और भगवद गीता के ज्ञान के बारे में मार्गदर्शन दे सकता हूँ।
+                    if language == "en":
+                        return False, f"""I am Lord Krishna, and I can only guide you on life's profound matters, spirituality, and the wisdom of the Bhagavad Gita.\n\nYou can ask me about:\n• Coping with life's challenges (anger, fear, anxiety)\n• Understanding Karma, Dharma, and the Soul\n• Navigating relationships and emotions\n• Seeking peace, meditation, and self-growth\n\nPlease ask questions related to these spiritual and life topics."""
+                    else:
+                        return False, f"""क्षमा करें, मैं श्री कृष्ण हूँ और केवल जीवन की समस्याओं, आध्यात्मिकता, और भगवद गीता के ज्ञान के बारे में मार्गदर्शन दे सकता हूँ।
 
 आप मुझसे पूछ सकते हैं:
 • जीवन की समस्याओं का समाधान (क्रोध, डर, चिंता)
@@ -952,16 +957,30 @@ Example: ["2.47", "18.66"]"""
     def search_with_llm(self, query: str, conversation_history: List[Dict] = None, **kwargs) -> Dict[str, Any]:
         """End-to-end RAG answer with conversation context."""
         
+        # Determine language heuristic quickly
+        import re
+        letters = re.sub(r'[^a-zA-Z\u0900-\u097F]', '', query)
+        en_count = len(re.findall(r'[a-zA-Z]', letters))
+        hi_count = len(re.findall(r'[\u0900-\u097F]', letters))
+        detected_lang = "en" if en_count > hi_count else "hi"
+
         # 0. Check for Greeting
         if self._is_greeting(query):
-             return {
-                 "answer": "राधे राधे! मैं श्री कृष्ण हूँ। कहिये, मैं आपकी क्या सहायता कर सकता हूँ?",
-                 "shlokas": [],
-                 "llm_used": True
-             }
+            if detected_lang == "en":
+                return {
+                    "answer": "Radhe Radhe! I am Lord Krishna. Tell me, how can I help you today?",
+                    "shlokas": [],
+                    "llm_used": True
+                }
+            else:
+                return {
+                    "answer": "राधे राधे! मैं श्री कृष्ण हूँ। कहिये, मैं आपकी क्या सहायता कर सकता हूँ?",
+                    "shlokas": [],
+                    "llm_used": True
+                }
 
         # 0.5 Check if query is relevant (Fast Regex Check)
-        is_relevant, rejection_message = self._is_relevant_to_krishna(query)
+        is_relevant, rejection_message = self._is_relevant_to_krishna(query, language=detected_lang)
         if not is_relevant:
             logger.warning(f"Rejecting irrelevant query (Regex): '{query}'")
             return {
@@ -976,8 +995,11 @@ Example: ["2.47", "18.66"]"""
         
         if not understanding.get('is_relevant', True):
             logger.warning(f"Rejecting irrelevant query (AI): '{query}'")
-            return {
-                "answer": """क्षमा करें, मैं श्री कृष्ण हूँ और केवल जीवन की समस्याओं, आध्यात्मिकता, और भगवद गीता के ज्ञान के बारे में मार्गदर्शन दे सकता हूँ।
+            
+            if detected_lang == "en":
+                ai_rejection = """I am Lord Krishna, and I can only guide you on life's profound matters, spirituality, and the wisdom of the Bhagavad Gita.\n\nYou can ask me about:\n• Coping with life's challenges (anger, fear, anxiety)\n• Understanding Karma, Dharma, and the Soul\n• Navigating relationships and emotions\n• Seeking peace, meditation, and self-growth\n\nPlease ask questions related to these spiritual and life topics."""
+            else:
+                ai_rejection = """क्षमा करें, मैं श्री कृष्ण हूँ और केवल जीवन की समस्याओं, आध्यात्मिकता, और भगवद गीता के ज्ञान के बारे में मार्गदर्शन दे सकता हूँ।
 
 आप मुझसे पूछ सकते हैं:
 • जीवन की समस्याओं का समाधान (क्रोध, डर, चिंता)
@@ -985,7 +1007,10 @@ Example: ["2.47", "18.66"]"""
 • रिश्तों और भावनाओं के बारे में
 • ध्यान, शांति, और आत्म-विकास के बारे में
 
-कृपया इन विषयों पर प्रश्न पूछें।""",
+कृपया इन विषयों पर प्रश्न पूछें।"""
+            
+            return {
+                "answer": ai_rejection,
                 "shlokas": [],
                 "llm_used": False,
                 "rejected": True
