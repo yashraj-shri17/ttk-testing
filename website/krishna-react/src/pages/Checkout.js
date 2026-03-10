@@ -18,8 +18,6 @@ function Checkout() {
     const [couponCode, setCouponCode] = useState('');
     const [appliedCoupon, setAppliedCoupon] = useState(null);
     const [couponMessage, setCouponMessage] = useState({ text: '', type: '' });
-    const [paymentMethod, setPaymentMethod] = useState('upi');
-
     const handleApplyCoupon = async () => {
         const code = couponCode.toUpperCase().trim();
         if (!code) return;
@@ -63,7 +61,6 @@ function Checkout() {
             }
         }
 
-        // Round to 2 decimals for the discount itself, but round the final total to nearest whole number
         const finalTotal = Math.max(0, Math.round(basePrice - discountAmount));
         return { total: finalTotal, discountAmount: Number(discountAmount.toFixed(2)) };
     };
@@ -72,8 +69,8 @@ function Checkout() {
 
     const handlePayment = (e) => {
         e.preventDefault();
-        // In a real app, this would integrate with Razorpay/Stripe, etc.
-        alert(`Proceeding to pay ₹${total} via ${paymentMethod.toUpperCase()}`);
+        // In a real app, this would integrate with a payment gateway (Razorpay/Stripe)
+        alert(`Proceeding to secure payment of ₹${total}`);
     };
 
     return (
@@ -87,106 +84,6 @@ function Checkout() {
                 </div>
 
                 <div className="checkout-content">
-                    {/* Left Side: Payment Details */}
-                    <div className="checkout-payment-section text-light">
-                        <h3>Select Payment Method</h3>
-
-                        <div className="payment-methods">
-                            <label className={`payment-method-card ${paymentMethod === 'upi' ? 'selected' : ''}`}>
-                                <input
-                                    type="radio"
-                                    name="payment"
-                                    value="upi"
-                                    checked={paymentMethod === 'upi'}
-                                    onChange={(e) => setPaymentMethod(e.target.value)}
-                                />
-                                <div className="method-info">
-                                    <span className="method-icon">📱</span>
-                                    <span className="method-name">UPI (Google Pay, PhonePe, Paytm)</span>
-                                </div>
-                            </label>
-
-                            <label className={`payment-method-card ${paymentMethod === 'card' ? 'selected' : ''}`}>
-                                <input
-                                    type="radio"
-                                    name="payment"
-                                    value="card"
-                                    checked={paymentMethod === 'card'}
-                                    onChange={(e) => setPaymentMethod(e.target.value)}
-                                />
-                                <div className="method-info">
-                                    <span className="method-icon">💳</span>
-                                    <span className="method-name">Credit / Debit Card</span>
-                                </div>
-                            </label>
-
-                            <label className={`payment-method-card ${paymentMethod === 'netbanking' ? 'selected' : ''}`}>
-                                <input
-                                    type="radio"
-                                    name="payment"
-                                    value="netbanking"
-                                    checked={paymentMethod === 'netbanking'}
-                                    onChange={(e) => setPaymentMethod(e.target.value)}
-                                />
-                                <div className="method-info">
-                                    <span className="method-icon">🏦</span>
-                                    <span className="method-name">Net Banking</span>
-                                </div>
-                            </label>
-                        </div>
-
-                        {/* Payment Forms depending on selection (Simulated UI) */}
-                        <div className="payment-details-form">
-                            {paymentMethod === 'upi' && (
-                                <div className="animate-fade-in">
-                                    <div className="form-group">
-                                        <label>Enter your UPI ID</label>
-                                        <input type="text" placeholder="example@upi" className="form-control premium-input" />
-                                    </div>
-                                    <p className="payment-hint">A payment request will be sent to your UPI app.</p>
-                                </div>
-                            )}
-
-                            {paymentMethod === 'card' && (
-                                <div className="animate-fade-in">
-                                    <div className="form-group">
-                                        <label>Card Number</label>
-                                        <input type="text" placeholder="0000 0000 0000 0000" className="form-control premium-input" />
-                                    </div>
-                                    <div className="form-row">
-                                        <div className="form-group half">
-                                            <label>Expiry Date</label>
-                                            <input type="text" placeholder="MM/YY" className="form-control premium-input" />
-                                        </div>
-                                        <div className="form-group half">
-                                            <label>CVV</label>
-                                            <input type="password" placeholder="***" className="form-control premium-input" />
-                                        </div>
-                                    </div>
-                                    <div className="form-group">
-                                        <label>Name on Card</label>
-                                        <input type="text" placeholder="John Doe" className="form-control premium-input" />
-                                    </div>
-                                </div>
-                            )}
-
-                            {paymentMethod === 'netbanking' && (
-                                <div className="animate-fade-in">
-                                    <div className="form-group">
-                                        <label>Select Bank</label>
-                                        <select className="form-control premium-input">
-                                            <option>State Bank of India</option>
-                                            <option>HDFC Bank</option>
-                                            <option>ICICI Bank</option>
-                                            <option>Axis Bank</option>
-                                            <option>Other Banks...</option>
-                                        </select>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-
-                    </div>
 
                     {/* Right Side: Order Summary */}
                     <div className="checkout-summary-section">
