@@ -27,10 +27,16 @@
     font-size: 2.5rem;
     font-weight: 700;
     margin-bottom: 0.5rem;
-    background: linear-gradient(90deg, #fff, #aaa);
+    background: linear-gradient(90deg, var(--text-primary), var(--text-secondary));
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
+}
+
+[data-theme='dark'] .checkout-header h2 {
+    background: linear-gradient(90deg, #fff, #aaa);
+    -webkit-background-clip: text;
+    background-clip: text;
 }
 
 @media (max-width: 768px) {
@@ -40,7 +46,7 @@
 }
 
 .checkout-header p {
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--text-secondary);
     font-size: 1.1rem;
 }
 
@@ -71,7 +77,8 @@
     font-weight: 600;
     margin-bottom: 1.5rem;
     padding-bottom: 0.5rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
 }
 
 /* Payment Methods List */
@@ -86,11 +93,15 @@
     display: flex;
     align-items: center;
     padding: 1.25rem 1.5rem;
-    background: rgba(var(--surface-color-rgb, 30, 30, 35), 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--surface);
+    border: 1px solid var(--border-color);
     border-radius: 12px;
     cursor: pointer;
     transition: all 0.3s ease;
+}
+
+[data-theme='dark'] .payment-method-card {
+    background: rgba(var(--surface-color-rgb, 30, 30, 35), 0.6);
 }
 
 .payment-method-card:hover {
@@ -155,10 +166,14 @@
 
 /* Payment Details UI (Simulated) */
 .payment-details-form {
-    background: rgba(var(--surface-color-rgb, 30, 30, 35), 0.4);
+    background: var(--surface);
     padding: 2rem;
     border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+}
+
+[data-theme='dark'] .payment-details-form {
+    background: rgba(var(--surface-color-rgb, 30, 30, 35), 0.4);
 }
 
 .form-group {
@@ -170,7 +185,7 @@
 .form-group label {
     margin-bottom: 0.5rem;
     font-size: 0.9rem;
-    color: rgba(255, 255, 255, 0.8);
+    color: var(--text-secondary);
 }
 
 .form-row {
@@ -212,17 +227,22 @@
 
 .payment-hint {
     font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--text-tertiary);
     margin-top: 0.5rem;
 }
 
 /* Summary Section */
 .summary-card {
-    background: rgba(var(--surface-color-rgb, 30, 30, 35), 0.8);
-    border: 1px solid rgba(var(--primary-color-rgb, 255, 184, 77), 0.2);
+    background: var(--surface-elevated);
+    border: 1px solid var(--border-color);
     border-radius: 16px;
     padding: 2rem;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+    box-shadow: var(--shadow-xl);
+}
+
+[data-theme='dark'] .summary-card {
+    background: rgba(var(--surface-color-rgb, 30, 30, 35), 0.8);
+    border: 1px solid rgba(var(--primary-color-rgb, 255, 184, 77), 0.2);
 }
 
 @media (max-width: 768px) {
@@ -250,7 +270,7 @@
 
 .summary-divider {
     border: none;
-    border-top: 1px dashed rgba(255, 255, 255, 0.2);
+    border-top: 1px dashed var(--border-color);
     margin: 1.5rem 0;
 }
 
@@ -267,7 +287,7 @@
 .coupon-section label {
     font-size: 0.9rem;
     margin-bottom: 0.5rem;
-    color: rgba(255, 255, 255, 0.8);
+    color: var(--text-secondary);
 }
 
 .coupon-input-group {
