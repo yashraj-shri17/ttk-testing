@@ -276,48 +276,46 @@ Examples:
         # 1. MODERN CONTEXT MAPPING (The "Bridge")
         # Map modern problems directly to the BEST philosophical shlokas
         modern_mappings = {
-            # CRISIS / DESPAIR
-            # Best shlokas: 6.5 (uplift yourself), 2.3 (rise from despair),
-            #               2.20 (soul is eternal), 18.66 (divine protection)
-            # NOTE: The LLM classifier handles all linguistic variants —
-            #       these are just semantic anchors for the vector search boost.
-            'suicide': ['6.5', '2.3', '2.20', '18.66', '9.22'],
-            'suicidal': ['6.5', '2.3', '2.20', '18.66', '9.22'],
-            'hopeless': ['6.5', '2.3', '18.66', '9.22'],
-            'give up': ['6.5', '2.3', '2.14', '18.66'],
-            'kill myself': ['6.5', '2.3', '2.20', '18.66'],
-            'end my life': ['6.5', '2.3', '2.20', '18.66'],
+            # ── CRISIS / DESPAIR ─────────────────────────────────────────────
+            # Spread across Ch.6, 9, 12, 18 (Chapter 2 moved to end or removed)
+            'suicide':    ['6.5', '9.22', '18.66', '12.13', '4.36', '2.3'],
+            'suicidal':   ['6.5', '9.22', '18.66', '12.13', '4.36', '2.3'],
+            'hopeless':   ['6.5', '9.22', '18.66', '11.33', '2.3'],
+            'give up':    ['6.5', '3.19', '18.66', '11.33', '2.3'],
+            'kill myself': ['6.5', '9.22', '18.66', '4.36', '2.20'],
+            'end my life': ['6.5', '9.22', '18.66', '4.36', '2.20'],
 
-            # WORK / CAREER / FAILURE
-            'job': ['2.47', '2.48', '3.8', '18.47', '18.48'],
-            'work': ['2.47', '3.8', '3.19', '18.45', '18.46'],
-            'exam': ['2.47', '2.38', '2.14', '6.5'],
-            'fail': ['2.47', '2.38', '2.14', '6.5', '2.50'],
-            'result': ['2.47', '2.55', '18.11', '5.10'],
-            'money': ['2.47', '18.38', '17.20', '16.13'],
+            # ── WORK / CAREER / FAILURE ──────────────────────────────────────
+            # Priority given to Ch.3, 18, 5, 4
+            'job':    ['3.8',  '18.47', '5.10', '4.18', '2.47'],
+            'work':   ['3.19', '3.8',   '18.46', '5.10', '2.47'],
+            'exam':   ['6.5',  '3.30',  '18.13', '4.38', '2.47'],
+            'fail':   ['6.5',  '3.30',  '18.13', '4.38', '2.38'],
+            'result': ['18.11','5.10',  '3.19',  '18.12', '2.47'],
+            'money':  ['16.13','17.20','18.38', '3.12'],
 
-            # PARENT / FAMILY CONFLICTS
-            'mother': ['3.35', '18.47', '2.47', '2.38', '9.27'],
-            'father': ['3.35', '18.47', '2.47', '2.38', '9.27'],
-            'mummy': ['3.35', '18.47', '2.47', '2.38', '9.27'],
-            'papa': ['3.35', '18.47', '2.47', '2.38', '9.27'],
-            'parents': ['3.35', '18.47', '2.47', '2.38', '9.27'],
-            'family refuse': ['3.35', '18.47', '2.47'],
-            'family against': ['3.35', '18.47', '2.47'],
-            'family conflict': ['3.35', '6.9', '2.47'],
+            # ── PARENT / FAMILY CONFLICTS ────────────────────────────────────
+            'mother':        ['3.35', '9.27',  '18.47', '6.9',  '13.2'],
+            'father':        ['3.35', '9.27',  '18.47', '6.9',  '13.2'],
+            'mummy':         ['3.35', '9.27',  '18.47', '6.9'],
+            'papa':          ['3.35', '9.27',  '18.47', '6.9'],
+            'parents':       ['3.35', '9.27',  '18.47', '6.9'],
+            'family refuse': ['3.35', '18.47', '9.27'],
+            'family against': ['3.35', '18.47', '6.9'],
+            'family conflict': ['3.35', '6.9',  '9.27'],
 
-            # RELATIONSHIPS / EMOTIONS
-            'breakup': ['2.62', '2.63', '2.66', '5.22', '18.54'],
-            'love': ['2.62', '2.63', '12.13', '12.14'],
-            'lonely': ['6.30', '9.29', '18.54', '13.16'],
-            'cheat': ['3.37', '16.21', '16.23'],
+            # ── RELATIONSHIPS / EMOTIONS ─────────────────────────────────────
+            'breakup': ['5.22', '12.13', '6.30', '9.29', '18.54', '2.62'],
+            'love':    ['12.13', '12.14', '9.29', '6.30'],
+            'lonely':  ['6.30',  '9.29',  '13.16','12.13'],
+            'cheat':   ['16.21', '3.37',  '16.23','4.8'],
 
-            # MENTAL HEALTH
-            'depression': ['6.5', '2.3', '6.6', '2.14', '18.66'],
-            'anxiety': ['2.14', '6.26', '6.35', '18.66'],
-            'stress': ['2.14', '2.56', '2.71', '12.15'],
-            'confused': ['2.7', '18.61', '18.66', '18.73'],
-            'anger': ['2.63', '16.21', '3.37', '3.38'],
+            # ── MENTAL HEALTH ────────────────────────────────────────────────
+            'depression': ['6.5',  '6.6',  '9.22', '18.66', '12.15'],
+            'anxiety':    ['6.26', '6.35', '18.66','3.30',  '12.15', '2.14'],
+            'stress':     ['6.35', '12.15','5.24', '3.30',  '2.14'],
+            'confused':   ['18.61','18.66','18.73','4.34',  '2.7'],
+            'anger':      ['3.37', '16.21', '3.38', '16.2', '2.63'],
         }
 
         # Check for modern triggers
@@ -478,10 +476,11 @@ Examples:
         idxs = np.argsort(sims)[::-1][:top_k]
         return [(int(i), float(sims[i])) for i in idxs]
 
-    def _rerank_with_llm(self, query: str, rewritten: str, candidates: List[Dict]) -> List[Dict]:
+    def _rerank_with_llm(self, query: str, rewritten: str, candidates: List[Dict], history: List[Dict] = None) -> List[Dict]:
         """
         Use LLM to rerank top candidates based on relevance to the specific problem.
         This provides a 'second opinion' to fix vector search blind spots.
+        Now also considers conversation history to avoid repeating chapters.
         """
         if not self.groq_client or not candidates:
             return candidates
@@ -492,19 +491,31 @@ Examples:
             for i, c in enumerate(candidates, 1):
                 options_text += f"Option {i} (ID {c['id']}): {c['meaning_english'][:300]}\n"
             
+            # Get recently used chapters to tell the LLM reranker as well
+            recently_used = []
+            for turn in (history or [])[-6:]:
+                for ts in turn.get('shlokas', []):
+                    if isinstance(ts, dict) and 'chapter' in ts:
+                        recently_used.append(str(ts['chapter']))
+            recently_str = ", ".join(sorted(set(recently_used))) if recently_used else "None"
+
             prompt = f"""You are a spiritual expert. Rerank these Bhagavad Gita verses based on their relevance to this user's problem.
-            
+
 User: "{rewritten}" (Original: "{query}")
 
 Verses:
 {options_text}
 
+Recently quoted chapters: {recently_str}
+
 Task:
 1. Identify the MOST relevant verse that directly provides a solution or perspective.
 2. Order them from Best to Worst.
-3. Return ONLY a list of IDs in JSON format.
+3. 🚨 CRITICAL RULE: The user wants to see variety. PREFER verses from chapters NOT in the 'Recently quoted chapters' list if they are reasonably relevant.
+4. 🚨 CHAPTER 2 RESTRICTION: Do not select Chapter 2 as the top result unless it is exceptionally relevant and no other verse comes close.
+5. Return ONLY a JSON object with key "ranked_ids" containing a list of IDs.
 
-Example: ["2.47", "18.66"]"""
+Example: {{"ranked_ids": ["18.66", "3.35", "12.13"]}}"""
             
             resp = self.groq_client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
@@ -521,29 +532,31 @@ Example: ["2.47", "18.66"]"""
                 if isinstance(data, list):
                     ranked_ids = data
                 elif isinstance(data, dict):
-                     # extensive search for list in values
-                     ranked_ids = next((v for v in data.values() if isinstance(v, list)), [])
+                    # Prefer the explicit 'ranked_ids' key we asked for, then scan other lists
+                    ranked_ids = data.get('ranked_ids') or next(
+                        (v for v in data.values() if isinstance(v, list)), []
+                    )
                 else:
                     ranked_ids = []
-            except:
+            except Exception:
                 ranked_ids = []
-            
+
             # Create a map for O(1) lookup
             candidate_map = {c['id']: c for c in candidates}
-            
-            # Reconstruct list in new order
+
+            # Reconstruct list in the LLM's new order
             reranked = []
             seen = set()
             for rid in ranked_ids:
                 if rid in candidate_map and rid not in seen:
                     reranked.append(candidate_map[rid])
                     seen.add(rid)
-            
-            # Append any missing ones at the end
+
+            # Append any candidates the LLM didn't mention
             for c in candidates:
                 if c['id'] not in seen:
                     reranked.append(c)
-                    
+
             if reranked:
                 logger.info(f"LLM Reranked top result: {reranked[0]['id']}")
             return reranked
@@ -597,6 +610,20 @@ Example: ["2.47", "18.66"]"""
         }
         target_emotion = emotion_map.get(emotional_state, emotional_state)
         
+        # Determine recently used chapters once (for diversity logic)
+        history = kwargs.get('conversation_history', [])
+        used_chapters = set()
+        for turn in history[-6:]:
+            turn_shlokas = turn.get('shlokas', [])
+            for ts in turn_shlokas:
+                # Handle both dict and string formats
+                if isinstance(ts, dict) and 'chapter' in ts:
+                    used_chapters.add(ts['chapter'])
+                elif isinstance(ts, str) and '.' in ts:
+                    try:
+                        used_chapters.add(int(ts.split('.')[0]))
+                    except: pass
+        
         for idx in list(candidates.keys()):
             shloka = self.shlokas[idx]
             
@@ -609,26 +636,75 @@ Example: ["2.47", "18.66"]"""
                      boost = 3.0 * (strength + 0.5) # Dynamic boost
                      candidates[idx] += boost 
             
+            # ── AGGRESSIVE CHAPTER 2 PENALTY ────────────────────────────────
+            # To meet the user requirement of <15-20% Ch.2 share, we apply a 
+            # heavy penalty to all Ch.2 shlokas so other chapters can "win" 
+            # the retrieval phase more easily.
+            if shloka.get('chapter') == 2:
+                candidates[idx] -= 15.0 # Increased penalty to push it down
+
+            # ── CHAPTER-HISTORY PENALTY ────────────────────────────────────
+            # Penalize chapters that have appeared in the last 6 turns
+            if shloka.get('chapter') in used_chapters:
+                # Penalize recently used chapters slightly but noticeably
+                candidates[idx] -= 8.0 # Penalty for historical repetition
+
             # Penalize generic/narrative verses unless boosted by keywords
             verse_id = shloka.get('id', '')
             # (Narrative penalty logic is already in keyword search, but let's reinforce if needed)
 
         initial_results = []
-        # Create a list of dictionaries with scores for debugging
-        debug_candidates = []
-        
-        # Sort by score for initial selection
+
+        # Sort all candidates by score (highest first)
         sorted_candidates = sorted(candidates.items(), key=lambda item: item[1], reverse=True)
-        top_pool_idxs = [idx for idx, score in sorted_candidates[:15]]
-        
-        for idx in top_pool_idxs:
+
+        # ── Chapter-Diversity Enforcement ────────────────────────────────────
+        # Build a pool of up to 15 candidates, but allow at most 2 verses from
+        # any single chapter.  This prevents Chapter 2 from monopolising the
+        # pool that is handed to the LLM reranker.
+        # Exception: if the hard-coded modern_mappings explicitly targeted a
+        # verse (high score ≥ 12.0), it always gets a seat regardless of cap.
+        MAX_PER_CHAPTER = 2
+        ALWAYS_INCLUDE_THRESHOLD = 12.0  # boosted/pinned verses keep their seat
+        POOL_SIZE = 15
+
+        chapter_counts: dict = {}
+        pool_idxs = []
+
+        for idx, score in sorted_candidates:
+            if len(pool_idxs) >= POOL_SIZE:
+                break
+            chapter = self.shlokas[idx].get('chapter', 0)
+            count = chapter_counts.get(chapter, 0)
+            
+            # STRICTOR CAP: Only 1 verse allowed from Chapter 2
+            # And only 1 verse from ANY chapter that has appeared recently in history
+            max_cap = 1 if (chapter == 2 or chapter in used_chapters) else 2
+            
+            # Always include high-priority pinned verses
+            if score >= ALWAYS_INCLUDE_THRESHOLD or count < max_cap:
+                pool_idxs.append(idx)
+                chapter_counts[chapter] = count + 1
+
+        # If diversity enforcement left us with fewer than 8, fill rest normally
+        if len(pool_idxs) < 8:
+            for idx, score in sorted_candidates:
+                if idx not in pool_idxs:
+                    pool_idxs.append(idx)
+                if len(pool_idxs) >= POOL_SIZE:
+                    break
+
+        for idx in pool_idxs:
             shloka_copy = self.shlokas[idx].copy()
             shloka_copy['score'] = candidates[idx]
             initial_results.append(shloka_copy)
-            
+
+        chapters_in_pool = sorted({s['chapter'] for s in initial_results})
+        logger.info(f"Diverse candidate pool: {len(initial_results)} shlokas across chapters {chapters_in_pool}")
+
         # 6. LLM Reranking (The Final Judge)
-        # Rerank the top 15 to find the true best 5
-        final_results = self._rerank_with_llm(query, rewritten_query, initial_results)
+        # Rerank the top pool to find the true best 5
+        final_results = self._rerank_with_llm(query, rewritten_query, initial_results, history=history)
             
         logger.info(f"Returning {min(len(final_results), top_k)} matches after refinement.")
         
@@ -954,19 +1030,21 @@ Example: ["2.47", "18.66"]"""
         logger.info(f"✅ Allowing query (default pass): '{query}'")
         return True, ""
 
-    def search_with_llm(self, query: str, conversation_history: List[Dict] = None, **kwargs) -> Dict[str, Any]:
+    def search_with_llm(self, query: str, conversation_history: List[Dict] = None, forced_language: str = None, **kwargs) -> Dict[str, Any]:
         """End-to-end RAG answer with conversation context."""
         
-        # Determine language heuristic quickly
+        # Determine language — use forced_language if provided by frontend
         import re
         letters = re.sub(r'[^a-zA-Z\u0900-\u097F]', '', query)
         en_count = len(re.findall(r'[a-zA-Z]', letters))
         hi_count = len(re.findall(r'[\u0900-\u097F]', letters))
         detected_lang = "en" if en_count > hi_count else "hi"
+        # Forced language from user's explicit selection takes priority
+        lang = forced_language if forced_language in ('en', 'hi') else detected_lang
 
         # 0. Check for Greeting
         if self._is_greeting(query):
-            if detected_lang == "en":
+            if lang == "en":
                 return {
                     "answer": "Radhe Radhe! I am Lord Krishna. Tell me, how can I help you today?",
                     "shlokas": [],
@@ -996,7 +1074,7 @@ Example: ["2.47", "18.66"]"""
         if not understanding.get('is_relevant', True):
             logger.warning(f"Rejecting irrelevant query (AI): '{query}'")
             
-            if detected_lang == "en":
+            if lang == "en":
                 ai_rejection = """I am Lord Krishna, and I can only guide you on life's profound matters, spirituality, and the wisdom of the Bhagavad Gita.\n\nYou can ask me about:\n• Coping with life's challenges (anger, fear, anxiety)\n• Understanding Karma, Dharma, and the Soul\n• Navigating relationships and emotions\n• Seeking peace, meditation, and self-growth\n\nPlease ask questions related to these spiritual and life topics."""
             else:
                 ai_rejection = """क्षमा करें, मैं श्री कृष्ण हूँ और केवल जीवन की समस्याओं, आध्यात्मिकता, और भगवद गीता के ज्ञान के बारे में मार्गदर्शन दे सकता हूँ।
@@ -1017,7 +1095,7 @@ Example: ["2.47", "18.66"]"""
             }
 
         # 1. Retrieve - Increased to 5 to give LLM better options
-        shlokas = self.search(query, top_k=5, understanding=understanding)
+        shlokas = self.search(query, top_k=5, understanding=understanding, conversation_history=conversation_history)
         
         # Log retrieved shlokas for debugging
         logger.info(f"📖 Retrieved {len(shlokas)} shlokas for query: '{query}'")
@@ -1044,7 +1122,8 @@ Example: ["2.47", "18.66"]"""
             query, 
             shlokas, 
             conversation_history=conversation_history or [],
-            tone=tone
+            tone=tone,
+            forced_language=lang
         )
 
     # Legacy wrappers for compatibility

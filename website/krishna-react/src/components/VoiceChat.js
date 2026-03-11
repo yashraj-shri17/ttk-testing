@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import VoiceOrb from './VoiceOrb';
 import MessageHistory from './MessageHistory';
 import VoiceControls from './VoiceControls';
+import LanguageModal from './LanguageModal';
 import './VoiceChat.css';
 import axios from 'axios';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -22,6 +23,8 @@ function VoiceChat() {
     const [transcript, setTranscript] = useState('');
     const [hasStarted, setHasStarted] = useState(false);
     const [activeMessageId, setActiveMessageId] = useState(null);
+    // null = not chosen yet; 'en' or 'hi' after selection
+    const [selectedLanguage, setSelectedLanguage] = useState(null);
     const mediaRecorderRef = useRef(null);
     const audioChunksRef = useRef([]);
     const audioContextRef = useRef(null);
@@ -220,7 +223,8 @@ function VoiceChat() {
                 question: text,
                 include_audio: true, // Request audio URL directly
                 session_id: sessionId,
-                user_id: user?.id
+                user_id: user?.id,
+                language: selectedLanguage  // pass explicit language
             }, {
                 timeout: 60000
             });
@@ -265,8 +269,8 @@ function VoiceChat() {
         }
     }, [speakText, user, sessionId]);
 
-    // Start Journey Handler
-    const handleStartJourney = async () => {
+    // Start Journey Handler (called after language is chosen)
+    const handleStartJourney = useCallback(async (lang) => {
         console.log("Starting journey - unlocking audio and sending welcome...");
 
         // 1. Unlock audio first (critical user gesture)
@@ -275,18 +279,27 @@ function VoiceChat() {
         // 2. Set has started to true to show the interface
         setHasStarted(true);
 
-        // 3. Send welcome message
+        // 3. Send welcome message in chosen language
+        const isEnglish = lang === 'en';
         const welcomeMsgId = Date.now();
         const welcomeMsg = {
             id: welcomeMsgId,
             type: 'krishna',
-            text: 'नमस्ते! मैं कृष्ण हूँ। मुझसे कुछ भी पूछें।',
+            text: isEnglish
+                ? 'Namaste! I am Krishna. Ask me anything from your heart.'
+                : 'नमस्ते! मैं कृष्ण हूँ। मुझसे कुछ भी पूछें।',
             timestamp: new Date()
         };
 
         setMessages([welcomeMsg]);
         speakText(welcomeMsg.text, welcomeMsgId);
-    };
+    }, [unlockAudio, speakText]);
+
+    // Called when user picks a language in the modal
+    const handleLanguageSelect = useCallback(async (lang) => {
+        setSelectedLanguage(lang);
+        await handleStartJourney(lang);
+    }, [handleStartJourney]);
 
     // Load previous history on mount
     useEffect(() => {
@@ -418,14 +431,19 @@ function VoiceChat() {
             }
         }
 
-        // Clear all messages
+        // Clear all messages and reset to language selection
         setMessages([]);
-        // Reset to initial state
         setHasStarted(false);
+        setSelectedLanguage(null); // show language modal again
     };
 
     return (
         <div className="voice-chat-container">
+            {/* Language Selection Modal — shown until user picks a language */}
+            {!selectedLanguage && (
+                <LanguageModal onSelect={handleLanguageSelect} />
+            )}
+
             {/* Header */}
             <header className="app-header">
                 <button className="icon-button back-button" onClick={() => {
@@ -464,14 +482,14 @@ function VoiceChat() {
 
             {/* Main Voice Interface */}
             <main className="main-content">
-                {!hasStarted && (
+                {!hasStarted && selectedLanguage && (
                     <div className="hero-section">
                         <h1 className="hero-title">
                             Seek Guidance <br />
                             <span className="highlight">From The Divine</span>
                         </h1>
                         <div className="quick-actions">
-                            <button className="action-chip active" onClick={handleStartJourney}>
+                            <button className="action-chip active" onClick={() => handleStartJourney(selectedLanguage)}>
                                 Start Journey
                             </button>
                             <button className="action-chip" onClick={() => setShowHistory(true)}>

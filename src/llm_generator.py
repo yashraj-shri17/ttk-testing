@@ -114,31 +114,38 @@ Reply with only: <tone> <language> (e.g., "general en")"""
         if is_hindi:
             base_instructions = """
 STRICT OUTPUT FORMAT (Follow Exactly):
-1. ONE opening sentence: acknowledge the user's specific situation (do NOT repeat this phrase anywhere).
+1. ONE opening sentence: acknowledge the user's specific situation.
 2. Quote EXACTLY ONE Shloka (the most relevant) in Sanskrit. Format: "भगवद गीता, अध्याय [Ch], श्लोक [Verse]" then the verse.
 3. EXPLAIN in 2-3 sentences: connect THIS specific shloka to THIS specific problem. No generic filler.
-4. ACTION: Give exactly 2 steps. Each step must be a DIFFERENT, CONCRETE action. Do NOT repeat any idea already stated above.
+4. ACTION STEPS: You MUST provide exactly TWO concrete steps for the user. 
+   Format:
+   कदम 1: [Specific action description]
+   कदम 2: [Specific action description]
 
 ABSOLUTE RULES:
 - Write in Hindi (Devanagari). Be concise and direct.
 - ALWAYS end the Sanskrit verse with the traditional '॥' marker.
-- Total response must be under 200 words.
+- You MUST include both steps. Do not skip them.
+- Total response must be under 250 words.
 - DO NOT include any emojis.
 """
         else:
             base_instructions = """
 STRICT OUTPUT FORMAT (Follow Exactly):
-1. ONE opening sentence: acknowledge the user's specific situation (do NOT repeat this phrase anywhere).
+1. ONE opening sentence: acknowledge the user's specific situation.
 2. Quote EXACTLY ONE Shloka (the most relevant) in Sanskrit. Format: "Bhagavad Gita, Chapter [Ch], Shloka [Verse]" then the verse.
 3. EXPLAIN in 2-3 sentences: connect THIS specific shloka to THIS specific problem. No generic filler.
-4. ACTION: Give exactly 2 steps. Each step must be a DIFFERENT, CONCRETE action. Do NOT repeat any idea already stated above.
+4. ACTION STEPS: You MUST provide exactly TWO concrete steps for the user.
+   Format:
+   Step 1: [Specific action description]
+   Step 2: [Specific action description]
 
 ABSOLUTE RULES:
 - Write in English. Be concise and direct.
 - The verse text MUST be in Devanagari script (Sanskrit).
 - ALWAYS end the Sanskrit verse with the traditional '॥' marker.
-- The citation header MUST be in English: "Bhagavad Gita, Chapter X, Shloka Y".
-- Total response must be under 200 words.
+- You MUST include both steps. Do not skip them.
+- Total response must be under 250 words.
 - DO NOT include any emojis.
 """
 
@@ -209,7 +216,8 @@ Options:
         retrieved_shlokas: List[Dict[str, Any]],
         conversation_history: List[Dict[str, Any]] = None,
         stream: bool = True,
-        tone: Optional[QueryTone] = None
+        tone: Optional[QueryTone] = None,
+        forced_language: Optional[str] = None
     ) -> Dict[str, Any]:
 
         if not self.is_available():
@@ -217,14 +225,21 @@ Options:
 
         try:
             # Step 1: Use provided tone or classify emotional gravity + detect language
-            lang = "hi"
-            if not tone:
+            # If forced_language is provided by the frontend, use it directly
+            if forced_language in ('en', 'hi'):
+                lang = forced_language
+                if not tone:
+                    result = self.classify_query(user_question)
+                    tone = result['tone']
+                    # language stays as forced_language
+            elif not tone:
                 result = self.classify_query(user_question)
                 tone = result['tone']
                 lang = result['language']
             else:
-                # If tone is forced, we still need to detect language for prompt setting
+                # If tone is forced but language not, still detect language
                 lang = self.classify_query(user_question)['language']
+
 
             # Step 2: Build shloka options
             history_context = self.format_conversation_history(conversation_history or [])
@@ -244,7 +259,7 @@ Options:
             )
 
             # Step 4: Token/temperature settings per tone
-            max_tokens = 450
+            max_tokens = 800  # Increased from 450 to prevent truncation in Hindi
             temperature = 0.5 if tone == "crisis" else 0.4
             freq_penalty = 0.7
             pres_penalty = 0.5
@@ -281,6 +296,9 @@ Options:
                 answer_text = response.choices[0].message.content
 
             logger.info(f"✓ [{tone.upper()}] answer generated in [{lang}]: {len(answer_text)} chars")
+            
+            # Post-process to remove verse numbers (॥23॥) and trailing citations
+            answer_text = self._clean_answer_text(answer_text)
 
             return {
                 'answer': answer_text,
@@ -293,6 +311,33 @@ Options:
         except Exception as e:
             logger.error(f"Generate failed: {e}")
             return {'answer': None, 'shlokas': retrieved_shlokas, 'llm_used': False}
+
+    def _clean_answer_text(self, text: str) -> str:
+        """
+        Clean the answer text:
+        1. Remove verse numbers at the end of Sanskrit verses (e.g., ॥23॥ or ॥५॥ -> ॥)
+        2. Remove redundant trailing shloka metadata if any.
+        """
+        import re
+        if not text:
+            return text
+            
+        # 1. Strip verse numbers inside or after markers ॥23॥ or ॥ २३ ॥ or ॥ 23
+        # This handles cases like ॥15॥, ॥ 15, | 15 |, ॥१५॥ etc.
+        text = re.sub(r'([।॥|])\s*[0-9०-९]+\s*[।॥|]?', r'\1', text)
+        
+        # 2. Strip any trailing citation in parentheses at the very end of the answer
+        # e.g., "... (Chapter 18, Shloka 66)" or "... (18.66)"
+        text = re.sub(r'\s*\(\s*(Chapter|अध्याय)?\s*\d+[\s,.]+\s*(Shloka|श्लोक)?\s*\d+\s*\)\s*$', '', text, flags=re.IGNORECASE | re.UNICODE)
+
+        # 3. Strip redundant "Bhagavad Gita, Chapter X, Shloka Y" at the very end (without parens)
+        redundant_cit = re.compile(
+            r'\n+\s*(Bhagavad\s*Gita|भगवद\s*गीता)[,،\s]*(Chapter|अध्याय)\s*\d+[,،\s]*(Shloka|श्लोक)\s*\d+\s*$',
+            re.IGNORECASE | re.UNICODE
+        )
+        text = redundant_cit.sub('', text)
+
+        return text.strip()
 
     def format_response(self, result: Dict[str, Any], user_question: str) -> str:
         """Format the response cleanly."""

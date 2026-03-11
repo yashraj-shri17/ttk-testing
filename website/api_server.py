@@ -61,11 +61,11 @@ def _clean_text_for_tts(text: str) -> str:
     )
     text = trailing_citation.sub('', text).strip()
 
-    # 3. Strip redundant shloka numbers at the end of verse lines (e.g., ॥25॥ or | 15 |)
+    # 3. Strip redundant shloka numbers at the end of verse lines (e.g., ॥25॥ or | 15 | or ॥ 15)
     #    Supports both Western (0-9) and Devanagari (०-९) digits
-    text = re.sub(r'[।॥|]\s*[0-9०-९]+\s*[।॥|]', '॥', text)
+    text = re.sub(r'([।॥|])\s*[0-9०-९]+\s*[।॥|]?', r'\1', text)
 
-    return text
+    return text.strip()
 
 
 def _split_text_for_tts(text: str):
@@ -353,18 +353,24 @@ def ask_question():
     """
     try:
         data = request.get_json()
-        
-        if not data or 'question' not in data:
-            return jsonify({
-                'error': 'No question provided',
-                'success': False
-            }), 400
-        
-        question = data['question'].strip()
+        question = (data.get('question') or '').strip()
+        print(f"DEBUG: Received request: {question}")
         include_audio = data.get('include_audio', False)
-        user_id = data.get('user_id')  # Optional: for logged-in users
+        user_id_raw = data.get('user_id')  # Optional: for logged-in users
+        # Validate user_id must be an integer (DB primary key)
+        user_id = None
+        if user_id_raw is not None:
+            try:
+                user_id = int(user_id_raw)
+            except (ValueError, TypeError):
+                user_id = None  # Ignore non-integer user IDs
         
-        session_id = data.get('session_id')  # New: Session ID for context filtering
+        session_id = data.get('session_id')  # Session ID for context filtering
+        # If frontend passes explicit language ('en' or 'hi'), use it directly.
+        # Otherwise, fall back to auto-detection inside the LLM.
+        forced_language = data.get('language')  # 'en' | 'hi' | None
+        if forced_language not in ('en', 'hi'):
+            forced_language = None
         
         if not question:
             return jsonify({
@@ -406,13 +412,15 @@ def ask_question():
         q_words = q_lower.split()
         
         is_greeting = False
-        greeting_language = "hi"
+        greeting_language = forced_language or "hi"  # use user's choice if available
         
         if q_words:
             full_query = ' '.join(q_words)
             if full_query in greetings_backup:
                 is_greeting = True
-                if full_query in english_greetings:
+                if forced_language:
+                    greeting_language = forced_language
+                elif full_query in english_greetings:
                     greeting_language = "en"
             
             elif len(q_words) >= 2:
@@ -470,15 +478,19 @@ def ask_question():
         
         # Get user's conversation history if logged in
         conversation_history = []
-        # if user_id:
-        #     # Filter history by session_id if provided (Disabled for faster response times)
-        #     conversation_history = get_user_history(user_id, session_id=session_id, limit=5)
-        #     print(f"Retrieved {len(conversation_history)} previous conversations for user {user_id} (Session: {session_id})")
+        if user_id:
+            # Filter history by session_id if provided 
+            conversation_history = get_user_history(user_id, session_id=session_id, limit=6)
+            print(f"Retrieved {len(conversation_history)} previous conversations for user {user_id} (Session: {session_id})")
         
         # Get answer from GitaAPI with conversation context
         import time
         start_time = time.time()
-        result = gita_api.search_with_llm(question, conversation_history=conversation_history)
+        result = gita_api.search_with_llm(
+            question,
+            conversation_history=conversation_history,
+            forced_language=forced_language
+        )
         llm_time = time.time() - start_time
         
         answer_text = result.get('answer')
@@ -712,43 +724,99 @@ if USE_POSTGRES:
     except Exception as e:
         print(f"❌ Error initializing DB pool: {e}")
 
+def _get_pg_conn():
+    """Get a working PostgreSQL connection, replacing broken ones in the pool."""
+    global pg_pool
+    if pg_pool:
+        conn = pg_pool.getconn()
+        try:
+            # Fast check: does the connection actually work?
+            conn.cursor().execute("SELECT 1")
+            return conn, True  # (conn, is_pooled)
+        except Exception:
+            # Connection is broken — discard it and get a fresh one
+            try:
+                pg_pool.putconn(conn, close=True)
+            except Exception:
+                pass
+            conn = pg_pool.getconn()
+            return conn, True
+    else:
+        return psycopg2.connect(DATABASE_URL), False
+
 def execute_db(query, params=(), commit=False, fetchone=False, fetchall=False):
     import sqlite3
     conn = None
     is_pooled = False
-    
+
     if USE_POSTGRES:
         if query.count('?') > 0:
             query = query.replace('?', '%s')
-            
-        if pg_pool:
-            conn = pg_pool.getconn()
-            is_pooled = True
-        else:
-            conn = psycopg2.connect(DATABASE_URL)
+
+        attempt = 0
+        last_err = None
+        while attempt < 2:
+            try:
+                conn, is_pooled = _get_pg_conn()
+                c = conn.cursor()
+                try:
+                    c.execute(query, params)
+                    result = None
+                    if fetchone:
+                        result = c.fetchone()
+                    elif fetchall:
+                        result = c.fetchall()
+                    if commit:
+                        conn.commit()
+                    return result
+                except psycopg2.OperationalError as e:
+                    if commit:
+                        try: conn.rollback()
+                        except: pass
+                    last_err = e
+                    # Discard broken connection and retry
+                    try:
+                        pg_pool.putconn(conn, close=True)
+                    except: pass
+                    conn = None
+                    attempt += 1
+                    continue
+                except Exception as e:
+                    if commit:
+                        try: conn.rollback()
+                        except: pass
+                    raise e
+                finally:
+                    try: c.close()
+                    except: pass
+            finally:
+                if conn is not None and is_pooled:
+                    try: pg_pool.putconn(conn)
+                    except: pass
+                elif conn is not None and not is_pooled:
+                    try: conn.close()
+                    except: pass
+                conn = None
+        raise last_err
     else:
         conn = sqlite3.connect(DB_NAME)
-    
-    c = conn.cursor()
-    try:
-        c.execute(query, params)
-        result = None
-        if fetchone:
-            result = c.fetchone()
-        elif fetchall:
-            result = c.fetchall()
-        if commit:
-            conn.commit()
-        return result
-    except Exception as e:
-        if commit:
-            conn.rollback()
-        raise e
-    finally:
-        c.close()
-        if is_pooled:
-            pg_pool.putconn(conn)
-        else:
+        c = conn.cursor()
+        try:
+            c.execute(query, params)
+            result = None
+            if fetchone:
+                result = c.fetchone()
+            elif fetchall:
+                result = c.fetchall()
+            if commit:
+                conn.commit()
+            return result
+        except Exception as e:
+            if commit:
+                conn.rollback()
+            raise e
+        finally:
+            c.close()
             conn.close()
 
 
@@ -995,6 +1063,7 @@ def get_user_history(user_id, session_id=None, limit=5):
         formatted_history.append({
             'question': q,
             'answer': a,
+            'shlokas': json.loads(shlokas) if shlokas else [],
             'timestamp': ts
         })
     return formatted_history
