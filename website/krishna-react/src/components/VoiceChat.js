@@ -267,7 +267,7 @@ function VoiceChat() {
             setIsLoading(false);
             setTranscript('');
         }
-    }, [speakText, user, sessionId]);
+    }, [speakText, user, sessionId, selectedLanguage]);
 
     // Start Journey Handler (called after language is chosen)
     const handleStartJourney = useCallback(async (lang) => {
