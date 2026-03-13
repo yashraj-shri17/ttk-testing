@@ -19,6 +19,7 @@ colorlog>=6.8.0
 flask>=3.0.0
 flask-cors>=4.0.0
 edge-tts>=6.1.9
+azure-cognitiveservices-speech>=1.38.0
 
 # Production WSGI Server
 gunicorn>=21.2.0

@@ -31,13 +31,30 @@ function VoiceChat() {
     const persistentAudioRef = useRef(null); // Primary audio element for iOS compatibility
     const isAudioUnlockedRef = useRef(false);
     const isCancelledRef = useRef(false);
+    const mediaSourceRef = useRef(null);     // Active MediaSource for streaming
+    const streamReaderRef = useRef(null);    // Active fetch ReadableStream reader
 
     // Generate Session ID once per mount
     const [sessionId] = useState(() => 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9));
 
     const stopAudio = useCallback(() => {
         console.log("Stopping audio...");
-        isCancelledRef.current = true; // Signal cancellation
+        isCancelledRef.current = true;
+
+        // Cancel active MediaSource stream reader (Hindi streaming)
+        if (streamReaderRef.current) {
+            try { streamReaderRef.current.cancel('User stopped'); } catch (e) {}
+            streamReaderRef.current = null;
+        }
+        // Close MediaSource if open
+        if (mediaSourceRef.current) {
+            try {
+                if (mediaSourceRef.current.readyState === 'open') {
+                    mediaSourceRef.current.endOfStream();
+                }
+            } catch (e) {}
+            mediaSourceRef.current = null;
+        }
 
         const audio = persistentAudioRef.current;
         if (audio) {
@@ -121,8 +138,8 @@ function VoiceChat() {
         };
     }, [unlockAudio]);
 
-    const speakText = useCallback(async (text, messageId = null, audioUrl = null) => {
-        if ((isSpeaking) && activeMessageId === messageId && messageId !== null) {
+    const speakText = useCallback(async (text, messageId = null, audioUrl = null, languageOverride = null) => {
+        if (isSpeaking && activeMessageId === messageId && messageId !== null) {
             stopAudio();
             return;
         }
@@ -132,43 +149,54 @@ function VoiceChat() {
         setIsSpeaking(true);
         setActiveMessageId(messageId);
 
+        const currentLang = languageOverride || selectedLanguage;
         const baseUrl = API_ENDPOINTS.ASK.split('/api/ask')[0];
         const fullUrl = audioUrl ? `${baseUrl}${audioUrl}` : null;
 
         try {
             const audio = persistentAudioRef.current;
-            if (!audio) throw new Error("Audio element missing");
-
-            // Ensure playsinline for iOS
+            if (!audio) throw new Error('Audio element missing');
             audio.setAttribute('playsinline', 'true');
             audio.setAttribute('webkit-playsinline', 'true');
 
             let src;
             if (fullUrl) {
+                // Pre-generated audio URL (English background generation)
                 src = fullUrl;
             } else {
-                const response = await axios.post(API_ENDPOINTS.SPEAK, { text }, { responseType: 'blob' });
+                // Generate audio via backend — Azure TTS for Hindi, Edge TTS for English
+                const response = await axios.post(
+                    API_ENDPOINTS.SPEAK,
+                    { text, language: currentLang },
+                    { responseType: 'blob', timeout: 30000 }
+                );
                 src = URL.createObjectURL(response.data);
+            }
+
+            if (isCancelledRef.current) {
+                if (src && src.startsWith('blob:')) URL.revokeObjectURL(src);
+                setIsSpeaking(false);
+                setActiveMessageId(null);
+                return;
             }
 
             audio.src = src;
             audio.load();
-
             audio.onended = () => {
                 setIsSpeaking(false);
                 setActiveMessageId(null);
                 if (src.startsWith('blob:')) URL.revokeObjectURL(src);
             };
-
             await audio.play();
-            console.log("✅ Audio working (iOS safe)");
+            console.log('✅ Audio playing —', currentLang === 'hi' ? 'Azure Aarav (Hindi)' : 'Edge TTS (English)');
 
         } catch (err) {
-            console.error("❌ Playback failed:", err);
+            console.error('❌ Playback failed:', err);
             setIsSpeaking(false);
             setActiveMessageId(null);
         }
-    }, [stopAudio, isSpeaking, activeMessageId]);
+    }, [stopAudio, isSpeaking, activeMessageId, selectedLanguage]);
+
 
     const handleAudioUpload = async (audioBlob) => {
         setIsLoading(true);
@@ -202,10 +230,8 @@ function VoiceChat() {
     const handleVoiceInput = useCallback(async (text) => {
         if (!text.trim()) return;
 
-        // Keep what you said visible while LLM thinks
         setTranscript(text);
 
-        // Add user message
         const userMessage = {
             id: Date.now(),
             type: 'user',
@@ -213,39 +239,36 @@ function VoiceChat() {
             timestamp: new Date()
         };
         setMessages(prev => [...prev, userMessage]);
-
         setIsLoading(true);
 
         try {
             const startTime = performance.now();
 
             const response = await axios.post(API_URL, {
-                question: text,
-                include_audio: true, // Request audio URL directly
-                session_id: sessionId,
-                user_id: user?.id,
-                language: selectedLanguage  // pass explicit language
-            }, {
-                timeout: 60000
-            });
+                question:      text,
+                include_audio: true,
+                session_id:    sessionId,
+                user_id:       user?.id,
+                language:      selectedLanguage
+            }, { timeout: 60000 });
 
             const textTime = performance.now() - startTime;
-            console.log(`⏱️ Text response received in ${textTime.toFixed(0)}ms`);
+            console.log(`⏱️ Text response in ${textTime.toFixed(0)}ms`);
 
             const krishnaMessageId = Date.now() + 1;
             const krishnaMessage = {
-                id: krishnaMessageId,
-                type: 'krishna',
-                text: response.data.answer || 'क्षमा करें, मैं अभी उत्तर देने में असमर्थ हूँ।',
+                id:        krishnaMessageId,
+                type:      'krishna',
+                text:      response.data.answer || 'क्षमा करें, मैं अभी उत्तर देने में असमर्थ हूँ।',
                 timestamp: new Date()
             };
-
             setMessages(prev => [...prev, krishnaMessage]);
 
-            // If audio_url is present, use it directly for faster playback
             if (response.data.audio_url) {
+                // English: use pre-generated background audio
                 speakText(krishnaMessage.text, krishnaMessageId, response.data.audio_url);
             } else {
+                // Hindi: call speakText which will hit /api/speak → Azure Aarav voice
                 speakText(krishnaMessage.text, krishnaMessageId);
             }
 
@@ -254,9 +277,9 @@ function VoiceChat() {
             const isTimeout = error.code === 'ECONNABORTED' || error.message?.includes('timeout');
             const errorMsgId = Date.now() + 1;
             const errorMsg = {
-                id: errorMsgId,
-                type: 'krishna',
-                text: isTimeout
+                id:        errorMsgId,
+                type:      'krishna',
+                text:      isTimeout
                     ? 'सर्वर जाग रहा है, कृपया 30 सेकंड बाद पुनः प्रयास करें।'
                     : 'क्षमा करें, कुछ गलत हो गया। कृपया पुनः प्रयास करें।',
                 timestamp: new Date()
@@ -292,7 +315,7 @@ function VoiceChat() {
         };
 
         setMessages([welcomeMsg]);
-        speakText(welcomeMsg.text, welcomeMsgId);
+        speakText(welcomeMsg.text, welcomeMsgId, null, lang);
     }, [unlockAudio, speakText]);
 
     // Called when user picks a language in the modal

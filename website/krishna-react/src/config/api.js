@@ -17,8 +17,9 @@ export const API_ENDPOINTS = {
     HISTORY: `${API_BASE_URL}/api/history`,
 
     // Audio (if needed)
-    SPEAK: `${API_BASE_URL}/api/speak`,
-    TRANSCRIBE: `${API_BASE_URL}/api/transcribe`,
+    SPEAK:         `${API_BASE_URL}/api/speak`,
+    SPEAK_STREAM:  `${API_BASE_URL}/api/speak-stream`,
+    TRANSCRIBE:    `${API_BASE_URL}/api/transcribe`,
 
     // Admin
     ADMIN_METRICS: `${API_BASE_URL}/api/admin/metrics`,

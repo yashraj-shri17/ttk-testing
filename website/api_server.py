@@ -2,10 +2,12 @@
 Flask API server for Talk to Krishna web interface.
 This provides a REST API endpoint for the web frontend.
 """
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response, stream_with_context
 from flask_cors import CORS
 import sys
 import os
+from dotenv import load_dotenv
+load_dotenv()  # ← MUST be before any os.getenv() calls
 
 # Add parent directory to path to import our modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,6 +27,75 @@ if not os.path.exists(AUDIO_DIR):
 # In-memory audio cache for fast serving
 audio_cache = {}
 import threading
+
+# ---------------------------------------------------------------------------
+# Azure Cognitive Services TTS helper (for Hindi – Aarav Neural voice)
+# Falls back to edge-tts if the SDK is not installed or keys are missing.
+# ---------------------------------------------------------------------------
+try:
+    import azure.cognitiveservices.speech as speechsdk
+    _AZURE_SDK_AVAILABLE = True
+except ImportError:
+    _AZURE_SDK_AVAILABLE = False
+    print("[TTS] azure-cognitiveservices-speech not installed — Hindi will use Edge TTS fallback.")
+
+AZURE_SPEECH_KEY    = os.getenv('AZURE_SPEECH_KEY', '')
+AZURE_SPEECH_REGION = os.getenv('AZURE_SPEECH_REGION', 'centralindia')
+
+# Hindi Azure voice
+AZURE_HINDI_VOICE = "hi-IN-AaravNeural"
+
+def _azure_tts_hindi(text: str, rate_percent: int = 5) -> bytes:
+    """
+    Synthesize *text* with Microsoft Azure Cognitive Services TTS using the
+    hi-IN-AaravNeural voice.  Returns raw MP3 bytes.
+
+    rate_percent: speaking-rate adjustment as a signed integer, e.g. +5 or -10.
+                  Applied via SSML <prosody rate> tag.
+    """
+    if not _AZURE_SDK_AVAILABLE:
+        raise RuntimeError("azure-cognitiveservices-speech SDK not installed")
+    if not AZURE_SPEECH_KEY:
+        raise RuntimeError("AZURE_SPEECH_KEY env var not set")
+
+    speech_config = speechsdk.SpeechConfig(
+        subscription=AZURE_SPEECH_KEY,
+        region=AZURE_SPEECH_REGION
+    )
+    speech_config.set_speech_synthesis_output_format(
+        speechsdk.SpeechSynthesisOutputFormat.Audio16Khz128KBitRateMonoMp3
+    )
+    speech_config.speech_synthesis_voice_name = AZURE_HINDI_VOICE
+
+    # Build SSML with prosody rate control
+    rate_str = f"+{rate_percent}%" if rate_percent >= 0 else f"{rate_percent}%"
+    ssml = (
+        f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
+        f'xml:lang="hi-IN">'
+        f'<voice name="{AZURE_HINDI_VOICE}">'
+        f'<prosody rate="{rate_str}">'
+        f'{text}'
+        f'</prosody></voice></speak>'
+    )
+
+    # audio_config=None means the audio data will be returned in the result.audio_data buffer
+    synthesizer = speechsdk.SpeechSynthesizer(
+        speech_config=speech_config,
+        audio_config=None
+    )
+    result = synthesizer.speak_ssml_async(ssml).get()
+
+    if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+        audio_data = result.audio_data
+        print(f"[Azure TTS] Synthesized {len(audio_data)//1024}KB for {len(text)} chars")
+        return audio_data
+    elif result.reason == speechsdk.ResultReason.Canceled:
+        cancellation = result.cancellation_details
+        raise RuntimeError(
+            f"Azure TTS canceled: {cancellation.reason} – {cancellation.error_details}"
+        )
+    else:
+        raise RuntimeError(f"Azure TTS unexpected result: {result.reason}")
 
 def _clean_text_for_tts(text: str) -> str:
     """
@@ -201,39 +272,57 @@ def _split_text_for_tts(text: str):
     return before_text, header_text, verse_text, after_text, is_english
 
 
-def _generate_audio_async(text: str) -> str:
+def _generate_audio_async(text: str, language=None) -> str:
     """
     Generate audio asynchronously and cache it.
     Returns audio_id immediately while generation happens in background.
-    
-    For shloka verses, uses a slower TTS rate so they are easier to follow.
-    For the rest of the text, normal slightly-faster rate is used.
+
+    language: 'hi' → Azure TTS (hi-IN-AaravNeural)
+              'en' or None → Edge TTS (en-US-GuyNeural / hi-IN-MadhurNeural auto-detected)
+
+    For shloka verses, uses a slower rate so they are easier to follow.
     Emojis and trailing duplicate shloka citations are cleaned before TTS.
     """
     audio_id = str(uuid.uuid4())
-    
+
     def generate():
         try:
             import time
-            gen_start = time.time()
-            print(f"Starting TTS generation for audio_id: {audio_id}")
-            
             import re
             import io
+            gen_start = time.time()
+            print(f"[TTS] Starting generation for audio_id: {audio_id} | lang={language}")
 
-            # 1. Clean text (remove emojis, strip trailing duplicate citation)
+            # 1. Clean text
             cleaned = _clean_text_for_tts(text)
-            # Remove residual HTML tags
             cleaned = re.sub(r'<[^>]*>', '', cleaned).strip()
-            print(f"Text length after cleaning: {len(cleaned)} characters")
+            print(f"[TTS] Cleaned text length: {len(cleaned)} chars")
 
-            # 2. Split into parts and language hint
+            # ---------------------------------------------------------------
+            # HINDI PATH: Azure Cognitive Services TTS — hi-IN-AaravNeural
+            # ---------------------------------------------------------------
+            if language == 'hi' and _AZURE_SDK_AVAILABLE and AZURE_SPEECH_KEY:
+                try:
+                    tts_start = time.time()
+                    audio_bytes = _azure_tts_hindi(cleaned, rate_percent=5)
+                    tts_time = time.time() - tts_start
+                    audio_cache[audio_id] = audio_bytes
+                    total_time = time.time() - gen_start
+                    print(f"[Azure TTS] Done: {tts_time:.2f}s total | "
+                          f"{len(audio_bytes)//1024}KB")
+                    return
+                except Exception as azure_err:
+                    print(f"[Azure TTS] Error (falling back to Edge TTS): {azure_err}")
+                    import traceback; traceback.print_exc()
+                    # Fall through to Edge TTS below
+
+            # ---------------------------------------------------------------
+            # ENGLISH PATH (or Hindi fallback): Edge TTS
+            # ---------------------------------------------------------------
             before_text, header_text, verse_text, after_text, is_english = _split_text_for_tts(cleaned)
-            
-            # 3. Choose voices
-            # Krishna English voice: mature, calm
-            main_voice = "en-US-GuyNeural" if is_english else "hi-IN-MadhurNeural"
-            shloka_voice = "hi-IN-MadhurNeural" # Always Hindi pronunciation for Sanskrit
+
+            main_voice   = "en-US-GuyNeural"    if is_english else "hi-IN-MadhurNeural"
+            shloka_voice = "hi-IN-MadhurNeural"  # Sanskrit always needs Hindi voice
 
             async def _gen_part(part_text: str, voice: str, rate: str) -> bytes:
                 if not part_text.strip():
@@ -246,53 +335,42 @@ def _generate_audio_async(text: str) -> str:
                 return buf.getvalue()
 
             async def _gen_all():
-                """Generate all parts and concatenate audio bytes."""
                 parts = []
-                # Slower rate for English (Krishna's wisdom should be calm/slow)
-                # Normal/Fast for Hindi is okay, but English needs to be meditative.
-                eng_rate = "-10%" 
-                hi_rate = "+5%" # Slightly slower for clarity than original +12%
+                eng_rate = "-10%"
+                hi_rate  = "+5%"
 
                 if before_text:
-                    parts.append(await _gen_part(before_text, main_voice, eng_rate if is_english else hi_rate))
-
+                    parts.append(await _gen_part(before_text, main_voice,
+                                                  eng_rate if is_english else hi_rate))
                 if header_text:
-                    parts.append(await _gen_part(header_text, main_voice, eng_rate if is_english else hi_rate))
-
+                    parts.append(await _gen_part(header_text, main_voice,
+                                                  eng_rate if is_english else hi_rate))
                 if verse_text:
-                    # Sanskrit verse always feels better at a calm pace
                     parts.append(await _gen_part(verse_text, shloka_voice, "+0%"))
-
                 if after_text:
-                    parts.append(await _gen_part(after_text, main_voice, eng_rate if is_english else hi_rate))
-
+                    parts.append(await _gen_part(after_text, main_voice,
+                                                  eng_rate if is_english else hi_rate))
                 if not parts and cleaned:
-                    parts.append(await _gen_part(cleaned, main_voice, eng_rate if is_english else hi_rate))
-
+                    parts.append(await _gen_part(cleaned, main_voice,
+                                                  eng_rate if is_english else hi_rate))
                 return b''.join([p for p in parts if p])
 
-            # Run async generation
-            tts_start = time.time()
+            tts_start  = time.time()
             audio_bytes = asyncio.run(_gen_all())
-            tts_time = time.time() - tts_start
-
-            # Cache the audio data
+            tts_time   = time.time() - tts_start
             audio_cache[audio_id] = audio_bytes
-
             total_time = time.time() - gen_start
-            audio_size = len(audio_cache[audio_id]) / 1024
-            print(f"TTS complete: {tts_time:.2f}s, Total: {total_time:.2f}s, Size: {audio_size:.1f}KB")
+            audio_size = len(audio_bytes) / 1024
+            print(f"[Edge TTS] Done: {tts_time:.2f}s | Total: {total_time:.2f}s | {audio_size:.1f}KB")
 
         except Exception as e:
-            print(f"Audio generation error: {e}")
+            print(f"[TTS] Audio generation error: {e}")
             import traceback
             traceback.print_exc()
             audio_cache[audio_id] = None
-    
-    # Start generation in background thread
+
     thread = threading.Thread(target=generate, daemon=True)
     thread.start()
-    
     return audio_id
 
 
@@ -300,10 +378,6 @@ def _generate_audio_async(text: str) -> str:
 app = Flask(__name__)
 
 # CORS configuration for production
-from dotenv import load_dotenv
-
-load_dotenv()
-
 import re
 frontend_url = os.getenv('FRONTEND_URL')
 allowed_origins = [
@@ -469,7 +543,7 @@ def ask_question():
                 save_conversation(user_id, question, greeting_text, [], session_id=session_id)
             
             if include_audio:
-                audio_id = _generate_audio_async(greeting_text)
+                audio_id = _generate_audio_async(greeting_text, language=greeting_language)
                 response['audio_url'] = f'/api/audio/{audio_id}'
                 print(f"Greeting audio generated: {audio_id}")
             
@@ -512,7 +586,7 @@ def ask_question():
         # Generate audio in parallel if requested
         if include_audio and answer_text:
             audio_start = time.time()
-            audio_id = _generate_audio_async(answer_text)
+            audio_id = _generate_audio_async(answer_text, language=forced_language)
             audio_time = time.time() - audio_start
             response['audio_url'] = f'/api/audio/{audio_id}'
             print(f"Timing: LLM={llm_time:.2f}s, Audio={audio_time:.2f}s")
@@ -532,24 +606,50 @@ def ask_question():
 def speak_text():
     """
     Generate audio from text using Neural TTS in-memory (no files saved).
-    Handles shloka speed and cleaning consistently with background generation.
+
+    Accepts JSON: { "text": "...", "language": "hi" | "en" }
+    When language=="hi", uses Azure TTS (hi-IN-AaravNeural).
+    Otherwise uses Edge TTS (auto-detected voice).
     """
     try:
         data = request.get_json()
-        text = data.get('text', '').strip()
-        
+        text     = data.get('text', '').strip()
+        language = data.get('language')   # 'hi' | 'en' | None
+
         if not text:
             return jsonify({'error': 'No text provided'}), 400
 
         import io
         import re
 
-        # 1. Clean and Split
+        # 1. Clean
         cleaned = _clean_text_for_tts(text)
         cleaned = re.sub(r'<[^>]*>', '', cleaned).strip()
-        before_text, header_text, verse_text, after_text, is_english = _split_text_for_tts(cleaned)
 
-        main_voice = "en-US-GuyNeural" if is_english else "hi-IN-MadhurNeural"
+        # ---------------------------------------------------------------
+        # HINDI PATH: Azure Cognitive Services TTS — hi-IN-AaravNeural
+        # ---------------------------------------------------------------
+        if language == 'hi' and _AZURE_SDK_AVAILABLE and AZURE_SPEECH_KEY:
+            try:
+                audio_bytes = _azure_tts_hindi(cleaned, rate_percent=5)
+                audio_buffer = io.BytesIO(audio_bytes)
+                audio_buffer.seek(0)
+                return send_file(
+                    audio_buffer,
+                    mimetype="audio/mpeg",
+                    as_attachment=False,
+                    download_name="response.mp3"
+                )
+            except Exception as azure_err:
+                print(f"[Azure TTS] /api/speak fallback to Edge TTS: {azure_err}")
+                import traceback; traceback.print_exc()
+                # Fall through to Edge TTS
+
+        # ---------------------------------------------------------------
+        # ENGLISH PATH (or Hindi fallback): Edge TTS
+        # ---------------------------------------------------------------
+        before_text, header_text, verse_text, after_text, is_english = _split_text_for_tts(cleaned)
+        main_voice   = "en-US-GuyNeural"   if is_english else "hi-IN-MadhurNeural"
         shloka_voice = "hi-IN-MadhurNeural"
 
         async def _gen_part(part_text: str, voice: str, rate: str) -> bytes:
@@ -563,27 +663,28 @@ def speak_text():
             return buf.getvalue()
 
         async def _gen_all():
-            parts = []
+            parts    = []
             eng_rate = "-10%"
-            hi_rate = "+5%"
-            
+            hi_rate  = "+5%"
             if before_text:
-                parts.append(await _gen_part(before_text, main_voice, eng_rate if is_english else hi_rate))
+                parts.append(await _gen_part(before_text, main_voice,
+                                              eng_rate if is_english else hi_rate))
             if header_text:
-                parts.append(await _gen_part(header_text, main_voice, eng_rate if is_english else hi_rate))
+                parts.append(await _gen_part(header_text, main_voice,
+                                              eng_rate if is_english else hi_rate))
             if verse_text:
                 parts.append(await _gen_part(verse_text, shloka_voice, "+0%"))
             if after_text:
-                parts.append(await _gen_part(after_text, main_voice, eng_rate if is_english else hi_rate))
+                parts.append(await _gen_part(after_text, main_voice,
+                                              eng_rate if is_english else hi_rate))
             if not parts and cleaned:
-                parts.append(await _gen_part(cleaned, main_voice, eng_rate if is_english else hi_rate))
+                parts.append(await _gen_part(cleaned, main_voice,
+                                              eng_rate if is_english else hi_rate))
             return b''.join([p for p in parts if p])
 
-        # Run generation
-        audio_bytes = asyncio.run(_gen_all())
+        audio_bytes  = asyncio.run(_gen_all())
         audio_buffer = io.BytesIO(audio_bytes)
         audio_buffer.seek(0)
-
         return send_file(
             audio_buffer,
             mimetype="audio/mpeg",
@@ -592,10 +693,122 @@ def speak_text():
         )
 
     except Exception as e:
-        print(f"TTS Error: {e}")
+        print(f"[TTS] /api/speak error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/speak-stream', methods=['POST'])
+def speak_stream_azure():
+    """
+    TRUE streaming TTS for Hindi using Azure Cognitive Services.
+
+    Connects to Azure, captures audio via the `synthesizing` event
+    (which fires multiple times with successive audio chunks), and
+    yield-streams each chunk to the client immediately.
+
+    The browser can start playback after the very first chunk (~300-400 ms)
+    instead of waiting for the full audio to be generated.
+
+    Request JSON: { "text": "...", "language": "hi" }
+    Response: chunked audio/mpeg stream
+    """
+    import queue as q_module
+    import re
+
+    data = request.get_json(force=True)
+    text     = (data.get('text') or '').strip()
+    language = data.get('language', 'hi')
+
+    if not text:
+        return jsonify({'error': 'No text provided'}), 400
+
+    if language != 'hi' or not _AZURE_SDK_AVAILABLE or not AZURE_SPEECH_KEY:
+        return jsonify({'error': 'Azure Hindi streaming not available'}), 503
+
+    # --- Clean text ---
+    cleaned = _clean_text_for_tts(text)
+    cleaned = re.sub(r'<[^>]*>', '', cleaned).strip()
+
+    # --- Build SSML ---
+    ssml = (
+        f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
+        f'xml:lang="hi-IN">'
+        f'<voice name="{AZURE_HINDI_VOICE}">'
+        f'<prosody rate="+5%">'
+        f'{cleaned}'
+        f'</prosody></voice></speak>'
+    )
+
+    # --- Azure Setup ---
+    speech_config = speechsdk.SpeechConfig(
+        subscription=AZURE_SPEECH_KEY,
+        region=AZURE_SPEECH_REGION
+    )
+    # MP3 @ 16kHz 128kbps — well-supported by MediaSource API
+    speech_config.set_speech_synthesis_output_format(
+        speechsdk.SpeechSynthesisOutputFormat.Audio16Khz128KBitRateMonoMp3
+    )
+
+    # audio_config=None  →  disables local speaker; we get audio via events only
+    synthesizer = speechsdk.SpeechSynthesizer(
+        speech_config=speech_config,
+        audio_config=None
+    )
+
+    chunk_queue = q_module.Queue()
+
+    def _on_synthesizing(evt):
+        """Called repeatedly as Azure produces audio chunks."""
+        data = evt.result.audio_data
+        if data:
+            chunk_queue.put(bytes(data))
+
+    def _on_completed(evt):
+        print(f"[Azure Stream] Synthesis completed")
+        chunk_queue.put(None)   # sentinel → generator will stop
+
+    def _on_canceled(evt):
+        details = evt.result.cancellation_details
+        print(f"[Azure Stream] Canceled: {details.reason} — {details.error_details}")
+        chunk_queue.put(None)   # sentinel
+
+    synthesizer.synthesizing.connect(_on_synthesizing)
+    synthesizer.synthesis_completed.connect(_on_completed)
+    synthesizer.synthesis_canceled.connect(_on_canceled)
+
+    # Non-blocking — starts synthesis in Azure SDK background thread
+    synthesizer.speak_ssml_async(ssml)
+    print(f"[Azure Stream] Synthesis started for {len(cleaned)} chars")
+
+    def _generate():
+        chunk_count = 0
+        try:
+            while True:
+                try:
+                    chunk = chunk_queue.get(timeout=30)  # max 30s per chunk
+                except q_module.Empty:
+                    print("[Azure Stream] Timeout — no chunk received in 30s")
+                    break
+                if chunk is None:           # sentinel → done
+                    break
+                chunk_count += 1
+                yield chunk
+        except GeneratorExit:
+            print("[Azure Stream] Client disconnected early")
+        finally:
+            print(f"[Azure Stream] Stream ended — sent {chunk_count} chunks")
+
+    return Response(
+        stream_with_context(_generate()),
+        mimetype='audio/mpeg',
+        headers={
+            'Cache-Control':       'no-cache, no-store',
+            'X-Accel-Buffering':   'no',       # disable nginx/proxy buffering
+            'Transfer-Encoding':   'chunked',
+        }
+    )
+
 
 @app.route('/api/transcribe', methods=['POST'])
 def transcribe_audio():
