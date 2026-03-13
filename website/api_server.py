@@ -540,7 +540,9 @@ def ask_question():
             }
             
             if user_id:
-                save_conversation(user_id, question, greeting_text, [], session_id=session_id)
+                # We skip saving generic greetings to the database to keep history clean
+                # save_conversation(user_id, question, greeting_text, [], session_id=session_id)
+                pass
             
             if include_audio:
                 audio_id = _generate_audio_async(greeting_text, language=greeting_language)
