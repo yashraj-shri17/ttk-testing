@@ -302,20 +302,28 @@ function VoiceChat() {
         // 2. Set has started to true to show the interface
         setHasStarted(true);
 
-        // 3. Send welcome message in chosen language
+        // 3. Append welcome message in chosen language to existing history
         const isEnglish = lang === 'en';
         const welcomeMsgId = Date.now();
-        const welcomeMsg = {
-            id: welcomeMsgId,
-            type: 'krishna',
-            text: isEnglish
-                ? 'Namaste! I am Krishna. Ask me anything from your heart.'
-                : 'नमस्ते! मैं कृष्ण हूँ। मुझसे कुछ भी पूछें।',
-            timestamp: new Date()
-        };
+        const welcomeText = isEnglish
+            ? 'Namaste! I am Krishna. Ask me anything from your heart.'
+            : 'नमस्ते! मैं कृष्ण हूँ। मुझसे कुछ भी पूछें।';
 
-        setMessages([welcomeMsg]);
-        speakText(welcomeMsg.text, welcomeMsgId, null, lang);
+        setMessages(prev => {
+            // Avoid duplicates if clicked multiple times rapidly
+            const alreadyHasWelcome = prev.some(m => m.text === welcomeText);
+            if (alreadyHasWelcome) return prev;
+
+            const welcomeMsg = {
+                id: welcomeMsgId,
+                type: 'krishna',
+                text: welcomeText,
+                timestamp: new Date()
+            };
+            return [...prev, welcomeMsg];
+        });
+
+        speakText(welcomeText, welcomeMsgId, null, lang);
     }, [unlockAudio, speakText]);
 
     // Called when user picks a language in the modal
@@ -344,10 +352,11 @@ function VoiceChat() {
                             loadedMessages.push({
                                 id: `hist_${idx}_a`,
                                 type: 'krishna',
-                                text: msg.answer,
+                                text: msg.answer || '...',
                                 timestamp: msg.timestamp ? new Date(msg.timestamp) : new Date()
                             });
                         });
+                        console.log(`✅ Loaded ${loadedMessages.length / 2} past dialogues`);
                         setMessages(loadedMessages);
                     }
                 } catch (err) {

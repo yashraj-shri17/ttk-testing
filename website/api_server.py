@@ -1288,11 +1288,13 @@ def save_conversation(user_id, question, answer, shlokas, session_id=None):
     ist_time = datetime.utcnow() + timedelta(hours=5, minutes=30)
     ist_str = ist_time.strftime('%Y-%m-%d %H:%M:%S')
     
+    print(f"DEBUG: Saving conversation for user_id={user_id} (Type: {type(user_id)})")
     shlokas_json = json.dumps(shlokas) if shlokas else None
     execute_db('''
         INSERT INTO conversations (user_id, session_id, question, answer, shlokas, timestamp)
         VALUES (?, ?, ?, ?, ?, ?)
     ''', (user_id, session_id, question, answer, shlokas_json, ist_str), commit=True)
+    print(f"DEBUG: Saved conversation successfully")
 
 def generate_reset_token():
     """Generate a secure random token."""
@@ -1591,9 +1593,13 @@ def get_user_chat_history():
         return jsonify({'error': 'User ID is required', 'success': False}), 400
     try:
         # Fetch up to 50 previous messages
+        print(f"DEBUG: Fetching history for user_id={user_id}")
         history = get_user_history(int(user_id), limit=50)
-        # Reverse history so oldest is first
-        history.reverse()
+        
+        # get_user_history ALREADY returns chronological order (oldest first)
+        # So we do NOT need to reverse it again here.
+        print(f"DEBUG: Found {len(history)} history records")
+        
         return jsonify({'success': True, 'history': history})
     except Exception as e:
         print(f"Error fetching history: {e}")
